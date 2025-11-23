@@ -15,10 +15,13 @@ load_dotenv()
 
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
-app.config['UPLOAD_FOLDER'] = 'uploads'
 
-# Ensure uploads directory exists
-os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+# Use /tmp for uploads on Vercel (serverless), otherwise use uploads folder
+if os.environ.get('VERCEL'):
+    app.config['UPLOAD_FOLDER'] = '/tmp'
+else:
+    app.config['UPLOAD_FOLDER'] = 'uploads'
+    os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
 # Initialize OpenAI client
 openai_api_key = os.getenv('OPENAI_API_KEY')
