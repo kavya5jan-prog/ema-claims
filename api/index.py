@@ -25,4 +25,4 @@ except ImportError as e:
 
 # Vercel expects the app to be exported
 # The @vercel/python builder will automatically handle WSGI
-__all__ = ['app']
+# Export the Flask app - Vercel will automatically detect it

@@ -785,6 +785,9 @@ def extract_facts():
             return jsonify({'error': 'OpenAI API key not configured. Please set OPENAI_API_KEY in your environment.'}), 500
         
         # Get all uploaded files data from request
+        if not request.json:
+            return jsonify({'error': 'Invalid request: JSON body required'}), 400
+        
         files_data = request.json.get('files', [])
         
         if not files_data:
@@ -796,10 +799,14 @@ def extract_facts():
             return jsonify(result), 200
         
         except Exception as e:
-            return jsonify({'error': f'Fact extraction failed: {str(e)}'}), 500
+            error_msg = str(e)
+            print(f"Fact extraction error: {error_msg}")  # Log for debugging
+            return jsonify({'error': f'Fact extraction failed: {error_msg}'}), 500
     
     except Exception as e:
-        return jsonify({'error': f'Request failed: {str(e)}'}), 500
+        error_msg = str(e)
+        print(f"Request error: {error_msg}")  # Log for debugging
+        return jsonify({'error': f'Request failed: {error_msg}'}), 500
 
 
 @app.route('/generate-summary', methods=['POST'])

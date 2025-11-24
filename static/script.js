@@ -303,7 +303,18 @@ function extractFacts() {
         },
         body: JSON.stringify({ files: filesData })
     })
-    .then(response => response.json())
+    .then(async response => {
+        // Check if response is OK before parsing JSON
+        const data = await response.json();
+        
+        if (!response.ok) {
+            // Handle error responses
+            const errorMessage = data.error || `Server error: ${response.status} ${response.statusText}`;
+            throw new Error(errorMessage);
+        }
+        
+        return data;
+    })
     .then(data => {
         hideTabLoading('factMatrix');
         
@@ -323,8 +334,15 @@ function extractFacts() {
     })
     .catch(err => {
         hideTabLoading('factMatrix');
-        showError('Failed to extract facts. Please try again.');
-        console.error('Error:', err);
+        // Display the actual error message if available
+        const errorMessage = err.message || 'Failed to extract facts. Please try again.';
+        showError(errorMessage);
+        console.error('Extract facts error:', err);
+        
+        // Log additional details for debugging
+        if (err.message) {
+            console.error('Error details:', err.message);
+        }
     });
 }
 
