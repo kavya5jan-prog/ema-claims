@@ -35,6 +35,21 @@ class Config:
     # OpenAI configuration
     OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
     
+    # SendGrid configuration
+    SENDGRID_API_KEY = os.getenv('SENDGRID_API_KEY')
+    SENDGRID_FROM_EMAIL = os.getenv('SENDGRID_FROM_EMAIL')
+    SENDGRID_FROM_NAME = os.getenv('SENDGRID_FROM_NAME', 'Auto Claims System')
+    
+    @staticmethod
+    def validate_sendgrid_config():
+        """Validate SendGrid configuration."""
+        if Config.SENDGRID_API_KEY and not Config.SENDGRID_FROM_EMAIL:
+            raise ValueError(
+                'SENDGRID_FROM_EMAIL is required when SENDGRID_API_KEY is set. '
+                'Please set SENDGRID_FROM_EMAIL environment variable.'
+            )
+        return True
+    
     # Image processing configuration (memory optimization)
     IMAGE_DPI = int(os.getenv('IMAGE_DPI', '72'))
     MAX_IMAGE_DIMENSION = int(os.getenv('MAX_IMAGE_DIMENSION', '2048'))

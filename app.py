@@ -4,6 +4,10 @@ import base64
 import json
 import re
 import time
+import uuid
+import requests
+import logging
+from datetime import datetime
 from flask import Flask, render_template, request, jsonify
 import pdfplumber
 import PyPDF2
@@ -15,8 +19,18 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
 app = Flask(__name__, static_folder='static', template_folder='templates')
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
+
+# Session configuration for login authentication
+app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'dev-secret-key-change-in-production-12345')
 
 # Use /tmp for uploads on Vercel (serverless), otherwise use uploads folder
 if os.environ.get('VERCEL'):
@@ -424,10 +438,8 @@ def extract_pdf_content(pdf_path):
     return result
 
 
-@app.route('/')
-def index():
-    """Render the main page."""
-    return render_template('index.html')
+# Root route moved to app/routes/main.py blueprint
+# This allows for login authentication before accessing the review page
 
 
 def extract_image_content(image_path):
@@ -1864,6 +1876,102 @@ Analyze the following uploaded files:"""
         return jsonify({'error': f'Evidence completeness check failed: {str(e)}'}), 500
 
 
+# Get the base directory (project root)
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+SAMPLE_FILES_FOLDER = os.path.join(BASE_DIR, 'sample files')
+
+
+@app.route('/list-sample-files', methods=['GET'])
+def list_sample_files():
+    """List all files in the sample files folder."""
+    try:
+        if not os.path.exists(SAMPLE_FILES_FOLDER):
+            return jsonify({'error': 'Sample files folder not found'}), 404
+        
+        files = []
+        for filename in os.listdir(SAMPLE_FILES_FOLDER):
+            file_path = os.path.join(SAMPLE_FILES_FOLDER, filename)
+            if os.path.isfile(file_path):
+                files.append(filename)
+        
+        return jsonify({'files': files}), 200
+    
+    except Exception as e:
+        return jsonify({'error': f'Failed to list sample files: {str(e)}'}), 500
+
+
+@app.route('/load-sample-file/<path:filename>', methods=['GET'])
+def load_sample_file(filename):
+    """Load and process a sample file from the sample files folder."""
+    try:
+        # Security: prevent directory traversal
+        filename = os.path.basename(filename)
+        file_path = os.path.join(SAMPLE_FILES_FOLDER, filename)
+        
+        if not os.path.exists(file_path):
+            return jsonify({'error': f'Sample file not found: {filename}'}), 404
+        
+        if not os.path.isfile(file_path):
+            return jsonify({'error': f'Not a file: {filename}'}), 400
+        
+        # Get file extension
+        filename_lower = filename.lower()
+        is_pdf = filename_lower.endswith('.pdf')
+        is_image = any(filename_lower.endswith(ext) for ext in ['.jpg', '.jpeg', '.png'])
+        is_audio = any(filename_lower.endswith(ext) for ext in ['.mp3', '.wav', '.m4a', '.mp4', '.mpeg', '.mpga', '.webm', '.ogg'])
+        
+        if not (is_pdf or is_image or is_audio):
+            return jsonify({'error': 'Invalid file type. Only PDF, PNG, JPEG, JPG, and audio files (MP3, WAV, M4A, etc.) are supported.'}), 400
+        
+        # Extract content
+        content_text = ''
+        if is_pdf:
+            # Extract PDF content
+            extracted_content = extract_pdf_content(file_path)
+            extracted_content['type'] = 'pdf'
+            extracted_content['filename'] = filename
+            extracted_content['originalFilename'] = filename
+            
+            # Extract text content for type detection (first 2-3 pages)
+            pages = extracted_content.get('pages', [])
+            for page in pages[:3]:  # First 3 pages
+                page_text = page.get('text', '').strip()
+                if page_text:
+                    content_text += page_text + '\n'
+        elif is_audio:
+            # Transcribe audio file
+            transcription = transcribe_audio(file_path)
+            extracted_content = {
+                'type': 'audio',
+                'filename': filename,
+                'originalFilename': filename,
+                'transcription': transcription,
+                'pages': [{
+                    'page_number': 1,
+                    'text': transcription
+                }]
+            }
+            content_text = transcription
+        else:
+            # Extract image content
+            extracted_content = extract_image_content(file_path)
+            extracted_content['filename'] = filename
+            extracted_content['originalFilename'] = filename
+            # For images, we'll use filename-based detection primarily
+            # Content-based detection for images would require OCR/vision API
+            content_text = ''  # Images don't have text content easily extractable
+        
+        # Detect document source type
+        detected_source, is_relevant = identify_document_source(filename, content_text if content_text else None)
+        extracted_content['detected_source'] = detected_source
+        extracted_content['is_relevant'] = is_relevant
+        
+        return jsonify(extracted_content), 200
+    
+    except Exception as e:
+        return jsonify({'error': f'Failed to load sample file: {str(e)}'}), 500
+
+
 @app.route('/generate-timeline', methods=['POST'])
 def generate_timeline():
     """Generate timeline reconstruction (sequence of events) using OpenAI based on fact matrix."""
@@ -2686,6 +2794,266 @@ def save_claim_rationale():
     except Exception as e:
         return jsonify({'error': f'Failed to save rationale: {str(e)}'}), 500
 
+
+@app.route('/generate-email-draft', methods=['POST'])
+def generate_email_draft():
+    """Generate an email draft requesting missing evidence using OpenAI."""
+    try:
+        # Import here to avoid circular imports
+        from app.services.openai_service import get_openai_service
+        from app.prompts import get_email_draft_prompt
+        
+        logger.info("[EMAIL DRAFT] Request received at /generate-email-draft")
+        logger.info(f"[EMAIL DRAFT] Request method: {request.method}")
+        logger.info(f"[EMAIL DRAFT] Request headers: {dict(request.headers)}")
+        
+        openai_service = get_openai_service()
+        if not openai_service.is_available():
+            error_msg = 'OpenAI API key not configured. Please set OPENAI_API_KEY in your environment.'
+            logger.error(f"[EMAIL DRAFT ERROR] {error_msg}")
+            return jsonify({'error': error_msg}), 500
+        
+        if not request.json:
+            error_msg = 'Invalid request: JSON body required'
+            logger.error(f"[EMAIL DRAFT ERROR] {error_msg}")
+            logger.error(f"[EMAIL DRAFT ERROR] Request content type: {request.content_type}")
+            logger.error(f"[EMAIL DRAFT ERROR] Request data: {request.data}")
+            return jsonify({'error': error_msg}), 400
+        
+        request_data = request.json
+        logger.info(f"[EMAIL DRAFT] Request data keys: {list(request_data.keys())}")
+        
+        selected_evidence = request_data.get('selected_evidence', [])
+        contact = request_data.get('contact', {})
+        claim_context = request_data.get('claim_context', '')
+        
+        logger.info(f"[EMAIL DRAFT] Selected evidence count: {len(selected_evidence)}")
+        logger.info(f"[EMAIL DRAFT] Contact: {contact.get('name', 'N/A')} ({contact.get('email', 'N/A')})")
+        
+        if not selected_evidence:
+            error_msg = 'No evidence items selected.'
+            logger.error(f"[EMAIL DRAFT ERROR] {error_msg}")
+            return jsonify({'error': error_msg}), 400
+        
+        if not contact or not contact.get('email'):
+            error_msg = 'Contact information is required.'
+            logger.error(f"[EMAIL DRAFT ERROR] {error_msg}")
+            logger.error(f"[EMAIL DRAFT ERROR] Contact data: {contact}")
+            return jsonify({'error': error_msg}), 400
+        
+        # Build user content for OpenAI
+        user_content = f"""Contact Information:
+Name: {contact.get('name', 'N/A')}
+Email: {contact.get('email', 'N/A')}
+Role: {contact.get('role', 'N/A')}
+
+Missing Evidence Items:
+"""
+        for idx, evidence in enumerate(selected_evidence, 1):
+            # Handle both new structure (evidence_needed) and old structure (component)
+            evidence_needed = evidence.get('evidence_needed') or evidence.get('component', 'N/A')
+            user_content += f"\n{idx}. {evidence_needed}\n"
+            if evidence.get('why_it_matters'):
+                user_content += f"   Why it matters: {evidence.get('why_it_matters')}\n"
+            elif evidence.get('reason'):
+                # Fallback for old structure
+                user_content += f"   Why it matters: {evidence.get('reason')}\n"
+            if evidence.get('suggested_follow_up'):
+                user_content += f"   Suggested follow-up: {evidence.get('suggested_follow_up')}\n"
+            if evidence.get('priority'):
+                user_content += f"   Priority: {evidence.get('priority')}\n"
+        
+        if claim_context:
+            user_content += f"\n\nClaim Context:\n{claim_context}\n"
+        
+        system_prompt = get_email_draft_prompt()
+        
+        logger.info("[EMAIL DRAFT] Calling OpenAI service to generate draft")
+        draft = openai_service.call_with_text_response(
+            system_prompt=system_prompt,
+            user_content=user_content,
+            max_tokens=2000
+        )
+        
+        if not draft:
+            error_msg = 'Failed to generate email draft. OpenAI API returned an empty response.'
+            logger.error(f"[EMAIL DRAFT ERROR] {error_msg}")
+            logger.error(f"[EMAIL DRAFT ERROR] OpenAI service response was None or empty")
+            return jsonify({'error': error_msg}), 500
+        
+        logger.info(f"[EMAIL DRAFT] Successfully generated draft (length: {len(draft)} characters)")
+        return jsonify({
+            'draft': draft,
+            'success': True
+        }), 200
+    
+    except Exception as e:
+        import traceback
+        error_trace = traceback.format_exc()
+        error_msg = f'Email draft generation failed: {str(e)}'
+        logger.error(f"[EMAIL DRAFT ERROR] {error_msg}")
+        logger.error(f"[EMAIL DRAFT ERROR] Traceback:\n{error_trace}")
+        print(f"[EMAIL DRAFT ERROR] Exception: {str(e)}")
+        print(f"[EMAIL DRAFT ERROR] Traceback:\n{error_trace}")
+        return jsonify({'error': error_msg}), 500
+
+
+@app.route('/send-email-request', methods=['POST'])
+def send_email_request():
+    """Send an email request using SendGrid."""
+    try:
+        # Import here to avoid circular imports
+        from app.config import Config
+        
+        request_data = request.json
+        to_email = request_data.get('to')
+        subject = request_data.get('subject', 'Request for Additional Evidence')
+        body = request_data.get('body', '')
+        selected_evidence = request_data.get('selected_evidence', [])
+        
+        if not to_email:
+            return jsonify({'error': 'Recipient email is required.'}), 400
+        
+        if not body:
+            return jsonify({'error': 'Email body is required.'}), 400
+        
+        # Check if SendGrid is configured
+        if not Config.SENDGRID_API_KEY:
+            # Fallback to mock mode for development
+            print(f"[MOCK EMAIL SEND - SendGrid not configured]")
+            print(f"To: {to_email}")
+            print(f"Subject: {subject}")
+            print(f"Body: {body[:200]}...")  # Truncate for logging
+            print(f"Selected Evidence Items: {len(selected_evidence)}")
+            print(f"Timestamp: {datetime.now().isoformat()}")
+            print(f"Note: Set SENDGRID_API_KEY environment variable to enable actual email sending")
+            
+            message_id = str(uuid.uuid4())
+            return jsonify({
+                'success': True,
+                'message_id': message_id,
+                'sent_at': datetime.now().isoformat(),
+                'mock_mode': True,
+                'note': 'SendGrid not configured - email was logged but not sent'
+            }), 200
+        
+        # Validate SendGrid configuration
+        if not Config.SENDGRID_FROM_EMAIL:
+            return jsonify({
+                'error': 'SENDGRID_FROM_EMAIL is required. Please set SENDGRID_FROM_EMAIL environment variable.'
+            }), 500
+        
+        # Send email using SendGrid REST API
+        try:
+            url = 'https://api.sendgrid.com/v3/mail/send'
+            headers = {
+                'Authorization': f'Bearer {Config.SENDGRID_API_KEY}',
+                'Content-Type': 'application/json'
+            }
+            
+            # Format request body according to SendGrid v3 API
+            payload = {
+                'personalizations': [
+                    {
+                        'to': [{'email': to_email}]
+                    }
+                ],
+                'from': {
+                    'email': Config.SENDGRID_FROM_EMAIL,
+                    'name': Config.SENDGRID_FROM_NAME
+                },
+                'subject': subject,
+                'content': [
+                    {
+                        'type': 'text/plain',
+                        'value': body
+                    }
+                ]
+            }
+            
+            # Send request
+            response = requests.post(url, headers=headers, json=payload)
+            
+            # Check response status
+            if response.status_code == 202:
+                # Success - SendGrid returns 202 Accepted
+                # Get message ID from response headers
+                message_id = response.headers.get('X-Message-Id') or str(uuid.uuid4())
+                
+                # Log successful send
+                print(f"[SENDGRID EMAIL SENT]")
+                print(f"To: {to_email}")
+                print(f"Subject: {subject}")
+                print(f"Status Code: {response.status_code}")
+                print(f"Message ID: {message_id}")
+                print(f"Timestamp: {datetime.now().isoformat()}")
+                
+                return jsonify({
+                    'success': True,
+                    'message_id': message_id,
+                    'sent_at': datetime.now().isoformat(),
+                    'status_code': response.status_code
+                }), 200
+            else:
+                # Handle error responses
+                error_message = f"HTTP {response.status_code}"
+                try:
+                    error_data = response.json()
+                    if 'errors' in error_data and len(error_data['errors']) > 0:
+                        error_message = error_data['errors'][0].get('message', error_message)
+                    elif 'error' in error_data:
+                        error_message = error_data['error']
+                except:
+                    error_message = response.text or error_message
+                
+                print(f"[SENDGRID ERROR] Failed to send email: {error_message}")
+                print(f"Response Status: {response.status_code}")
+                print(f"Response Body: {response.text[:500]}")
+                
+                # Provide more helpful error messages
+                if response.status_code == 401:
+                    return jsonify({'error': 'SendGrid authentication failed. Please check your SENDGRID_API_KEY.'}), 500
+                elif response.status_code == 403:
+                    return jsonify({'error': 'SendGrid access forbidden. Please check your API key permissions.'}), 500
+                elif response.status_code == 400:
+                    return jsonify({'error': f'Invalid email request: {error_message}'}), 400
+                else:
+                    return jsonify({'error': f'SendGrid error: {error_message}'}), 500
+        
+        except requests.exceptions.RequestException as send_error:
+            # Handle network/request errors
+            error_message = str(send_error)
+            print(f"[SENDGRID ERROR] Request failed: {error_message}")
+            return jsonify({'error': f'Failed to connect to SendGrid: {error_message}'}), 500
+    
+    except Exception as e:
+        print(f"[EMAIL SEND ERROR] Unexpected error: {str(e)}")
+        return jsonify({'error': f'Email sending failed: {str(e)}'}), 500
+
+
+# Register blueprints for modular routes
+try:
+    from app.routes import main, facts, analysis, documents
+    app.register_blueprint(main.bp)
+    app.register_blueprint(facts.bp)
+    app.register_blueprint(analysis.bp)
+    app.register_blueprint(documents.bp)
+    logger.info("Blueprints registered successfully")
+    
+    # Log all registered routes for debugging
+    logger.info("Registered routes:")
+    for rule in app.url_map.iter_rules():
+        if rule.endpoint != 'static':
+            logger.info(f"  {rule.rule} -> {rule.endpoint} [{', '.join(rule.methods)}]")
+except Exception as e:
+    import traceback
+    error_msg = f"ERROR: Could not register blueprints: {str(e)}"
+    logger.error(error_msg)
+    logger.error(f"Traceback:\n{traceback.format_exc()}")
+    print(error_msg)
+    print(f"Traceback:")
+    traceback.print_exc()
+    print("Continuing with app initialization...")
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5001))

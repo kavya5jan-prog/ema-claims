@@ -38,29 +38,38 @@
 
 .big-upload-button {
     display: flex;
-    flex-direction: column;
+    flex-direction: row;
     align-items: center;
     justify-content: center;
-    gap: 8px;
+    gap: 10px;
     width: 100%;
-    max-width: 400px;
+    max-width: 300px;
     margin: 0 auto;
-    padding: 32px 24px;
-    background: #f8f9fa;
-    color: #333;
-    border: 2px dashed #ddd;
+    padding: 14px 24px;
+    background: #333;
+    color: white;
+    border: none;
     border-radius: 8px;
     cursor: pointer;
     transition: all 0.2s ease;
+    font-size: 1em;
+    font-weight: 500;
 }
 
 .big-upload-button:hover {
-    border-color: #333;
-    background: #f0f0f0;
+    background: #555;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
 }
 
 .big-upload-button:active {
-    background: #e8e8e8;
+    background: #222;
+    transform: translateY(0);
+}
+
+.big-upload-button .upload-icon {
+    font-size: 1.2em;
+    opacity: 0.9;
 }
 
 .file-list-container {
@@ -78,6 +87,44 @@
     color: #333;
     font-size: 1.4em;
     margin: 0;
+}
+
+.header-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.small-upload-button {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 16px;
+    background: #333;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    font-size: 0.9em;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.small-upload-button:hover {
+    background: #555;
+    transform: translateY(-1px);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
+}
+
+.small-upload-button:active {
+    background: #222;
+    transform: translateY(0);
+}
+
+.small-upload-button svg {
+    width: 16px;
+    height: 16px;
+    stroke: currentColor;
 }
 
 .file-list {
@@ -513,6 +560,11 @@
     color: #721c24;
 }
 
+.status-email-sent {
+    background: #cfe2ff;
+    color: #084298;
+}
+
 .check-card-details {
     color: #666;
     font-size: 0.95em;
@@ -521,6 +573,33 @@
 
 .check-card-details p {
     margin: 0;
+}
+
+/* Email Status Indicators */
+.email-status-indicator {
+    display: inline-block;
+    margin-left: 8px;
+    font-size: 1.1em;
+    cursor: help;
+    vertical-align: middle;
+}
+
+.email-status-indicator:hover {
+    opacity: 0.8;
+}
+
+.evidence-check-row .check-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.evidence-check-row .status-badge-container {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
 }
 
 

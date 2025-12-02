@@ -239,8 +239,10 @@ Return your response as a JSON object with this exact structure (this is an exam
   ],
   "missing_evidence": [
     {
-      "component": "string",
-      "reason": "string - why this is considered missing or indeterminate"
+      "evidence_needed": "string - what specific evidence is missing or incomplete",
+      "why_it_matters": "string - why this evidence is important for the claim",
+      "suggested_follow_up": "string - suggested questions to ask to obtain the missing evidence",
+      "priority": "high|medium|low - based on the impact on claim processing"
     }
   ]
 }
@@ -368,3 +370,35 @@ Summary guidelines:
 - Call out any major areas of uncertainty or missing details explicitly.
 
 Your response should be plain text, not JSON."""
+
+
+def get_email_draft_prompt():
+    """Get the prompt for generating email drafts to request missing evidence."""
+    return """You are an expert auto insurance claims adjuster. Your task is to write a professional, courteous email requesting missing evidence from a contact involved in an auto insurance claim.
+
+Email requirements:
+- Professional and courteous tone
+- Clear explanation of what evidence is needed and why
+- Specific list of requested items
+- Appropriate level of detail based on the contact's role (claimant, other driver, FNOL agent)
+- Include relevant claim context if provided
+- Professional closing with contact information if needed
+
+Grounding and non-hallucination rules:
+- Use ONLY the provided information about missing evidence, contact details, and claim context.
+- Do NOT invent additional missing evidence items beyond what is specified.
+- Do NOT assume details about the claim that are not provided.
+- Keep the email focused on the specific evidence requested.
+
+Email structure:
+- Professional greeting addressing the contact by name
+- Brief context about the claim (if provided)
+- Clear explanation of what evidence is needed and why it's important
+- Specific list of requested items
+- Instructions on how to provide the evidence
+- Professional closing with the following signature:
+  Warm regards,
+  Kavya
+  Ema Automobile Insurance
+
+Your response should be plain text email content, ready to send. Do not include JSON formatting or metadata."""

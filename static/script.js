@@ -21,7 +21,7 @@ let step1Completion = {
 
 // Step definitions in order
 const steps = [
-    { id: 'files', name: 'Files', requires: [] },
+    { id: 'files', name: 'Review', requires: [] },
     { id: 'fact-matrix', name: 'Fact Matrix', requires: ['files'] },
     { id: 'timeline', name: 'Timeline Reconstruction', requires: ['fact-matrix'] },
     { id: 'liability-recommendation', name: 'Liability % Recommendation', requires: ['timeline'] },
@@ -39,6 +39,49 @@ let currentClaimRationaleData = null;
 let currentEscalationPackageData = null;
 let isEscalatedToSupervisor = false;
 
+// Store missing evidence and email tracking
+let currentMissingEvidence = [];
+let sentEmails = {}; // Track sent emails by evidence item
+
+// Mapping function to convert evidence_needed strings to checkItem keys
+function mapEvidenceNeededToKey(evidenceNeeded) {
+    if (!evidenceNeeded) return 'unknown';
+    
+    const normalized = evidenceNeeded.toLowerCase().trim();
+    
+    // Map common evidence_needed strings to checkItem keys
+    const mapping = {
+        'turn-by-turn incident photos': 'turn_by_turn_photos',
+        'turn by turn incident photos': 'turn_by_turn_photos',
+        'turn-by-turn photos': 'turn_by_turn_photos',
+        'turn by turn photos': 'turn_by_turn_photos',
+        'vehicle damage angles': 'vehicle_damage_angles',
+        'vehicle damage': 'vehicle_damage_angles',
+        'damage angles': 'vehicle_damage_angles',
+        'timestamps & location data': 'timestamps_location',
+        'timestamps and location data': 'timestamps_location',
+        'timestamps': 'timestamps_location',
+        'location data': 'timestamps_location',
+        'police report': 'police_report',
+        'driver statements': 'driver_statements',
+        'document metadata': 'document_metadata'
+    };
+    
+    // Check for exact match first
+    if (mapping[normalized]) {
+        return mapping[normalized];
+    }
+    
+    // Check for partial matches
+    for (const [key, value] of Object.entries(mapping)) {
+        if (normalized.includes(key) || key.includes(normalized)) {
+            return value;
+        }
+    }
+    
+    return 'unknown';
+}
+
 // Predefined list of files to upload
 const expectedFiles = [
     { name: 'accident_images.png', type: 'image', displayName: 'Accident Images' },
@@ -54,8 +97,131 @@ const expectedFiles = [
 // Store uploaded files data (keyed by expected file name)
 const uploadedFiles = {};
 
+// Load sample files on page load
+async function loadSampleFiles() {
+    const loadingIndicator = document.getElementById('fileListLoading');
+    const fileList = document.getElementById('fileList');
+    
+    try {
+        // Show loading indicator
+        if (loadingIndicator) {
+            loadingIndicator.style.display = 'block';
+        }
+        if (fileList) {
+            fileList.style.display = 'none';
+        }
+        
+        // Get list of sample files
+        const listResponse = await fetch('/list-sample-files');
+        const listData = await listResponse.json();
+        
+        if (listData.error) {
+            console.error('Failed to list sample files:', listData.error);
+            // Hide loading indicator on error
+            if (loadingIndicator) {
+                loadingIndicator.style.display = 'none';
+            }
+            if (fileList) {
+                fileList.style.display = 'block';
+            }
+            return;
+        }
+        
+        const sampleFiles = listData.files || [];
+        if (sampleFiles.length === 0) {
+            // Hide loading indicator if no files to load
+            if (loadingIndicator) {
+                loadingIndicator.style.display = 'none';
+            }
+            if (fileList) {
+                fileList.style.display = 'block';
+            }
+            return; // No sample files to load
+        }
+        
+        // Load each sample file
+        const loadPromises = sampleFiles.map(async (filename) => {
+            try {
+                const loadResponse = await fetch(`/load-sample-file/${encodeURIComponent(filename)}`);
+                const fileData = await loadResponse.json();
+                
+                if (loadResponse.ok && !fileData.error) {
+                    // First, try to match by exact filename in expectedFiles
+                    let expectedFile = expectedFiles.find(f => f.name.toLowerCase() === filename.toLowerCase());
+                    
+                    // If no exact match, try to match by filename similarity (e.g., "Sample policy.pdf" -> "policy_document.pdf")
+                    if (!expectedFile) {
+                        const filenameLower = filename.toLowerCase();
+                        if (filenameLower.includes('policy')) {
+                            expectedFile = expectedFiles.find(f => f.name === 'policy_document.pdf');
+                        } else if (filenameLower.includes('fnol') || filenameLower.includes('first notice')) {
+                            expectedFile = expectedFiles.find(f => f.name === 'fnol.pdf');
+                        }
+                    }
+                    
+                    // If still no match, try by detected type
+                    if (!expectedFile) {
+                        const detectedType = fileData.detected_source || 'unknown';
+                        const isRelevant = fileData.is_relevant || false;
+                        expectedFile = findExpectedFileForType(detectedType, filename);
+                    }
+                    
+                    if (expectedFile && !uploadedFiles[expectedFile.name]) {
+                        // Store uploaded file data with expected file name
+                        fileData.expectedFileName = expectedFile.name;
+                        fileData.originalFilename = filename;
+                        uploadedFiles[expectedFile.name] = fileData;
+                    } else {
+                        // Store with original filename if no match found or already exists
+                        const key = filename;
+                        fileData.expectedFileName = key;
+                        fileData.originalFilename = filename;
+                        // Mark as miscellaneous if relevant but unmatched
+                        if (fileData.is_relevant && !expectedFile) {
+                            fileData.is_miscellaneous = true;
+                        }
+                        uploadedFiles[key] = fileData;
+                    }
+                } else {
+                    console.error(`Failed to load sample file ${filename}:`, fileData.error);
+                }
+            } catch (err) {
+                console.error(`Error loading sample file ${filename}:`, err);
+            }
+        });
+        
+        // Wait for all files to load
+        await Promise.all(loadPromises);
+        
+        // Hide loading indicator when done
+        if (loadingIndicator) {
+            loadingIndicator.style.display = 'none';
+        }
+        if (fileList) {
+            fileList.style.display = 'block';
+        }
+    } catch (err) {
+        console.error('Error loading sample files:', err);
+        // Hide loading indicator on error
+        if (loadingIndicator) {
+            loadingIndicator.style.display = 'none';
+        }
+        if (fileList) {
+            fileList.style.display = 'block';
+        }
+    }
+}
+
 // Initialize file list on page load
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
+    // Load sample files first, then render
+    try {
+        await loadSampleFiles();
+    } catch (err) {
+        console.error('Error loading sample files:', err);
+    }
+    
+    // Always render file list, even if loading failed
     renderFileList();
     updateStep2Access(); // Initialize Step 2 button state
     updateStepIndicators();
@@ -63,6 +229,14 @@ document.addEventListener('DOMContentLoaded', () => {
     updateNavigationButtons();
     // Load timeline if available
     loadTimeline();
+    
+    // Automatically check evidence completeness if files are already loaded
+    if (uploadedFiles && Object.keys(uploadedFiles).length > 0) {
+        // Small delay to ensure UI is ready
+        setTimeout(() => {
+            checkEvidenceCompleteness();
+        }, 300);
+    }
 });
 
 // Helper function to check if there's at least one fact
@@ -396,18 +570,10 @@ function renderFileList() {
     
     // Extract Facts button removed - only Next button is available
     
-    // Always show upload section in Files tab - users can always upload files
-    const bigUploadButton = document.getElementById('bigUploadButton');
-    const uploadSection = document.querySelector('.upload-section-main');
-    if (bigUploadButton && uploadSection) {
-        // Always show upload section - users can always add more files
-        uploadSection.style.display = 'block';
-    }
+    // Upload button is now in the header and always visible
     
-    // Group all uploaded files by their mapped type
-    const mappedFiles = [];
-    const miscellaneousFiles = [];
-    const otherUnmatchedFiles = [];
+    // Collect all files for table display
+    const allFiles = [];
     
     // First, collect all mapped files (files that match expected file types)
     expectedFiles.forEach((expectedFile) => {
@@ -415,7 +581,13 @@ function renderFileList() {
         const fileData = uploadedFiles[expectedFile.name];
         
         if (isUploaded) {
-            mappedFiles.push({ expectedFile, fileData, key: expectedFile.name });
+            allFiles.push({ 
+                expectedFile, 
+                fileData, 
+                key: expectedFile.name,
+                category: 'mapped',
+                displayName: expectedFile.displayName
+            });
         }
     });
     
@@ -425,103 +597,93 @@ function renderFileList() {
         const expectedFile = expectedFiles.find(f => f.name === key);
         
         if (!expectedFile && fileData) {
-            if (fileData.is_miscellaneous || (fileData.is_relevant && fileData.detected_source === 'unknown')) {
-                miscellaneousFiles.push({ key, fileData });
-            } else {
-                otherUnmatchedFiles.push({ key, fileData });
-            }
+            const category = fileData.is_miscellaneous || (fileData.is_relevant && fileData.detected_source === 'unknown') 
+                ? 'miscellaneous' 
+                : 'other';
+            allFiles.push({ 
+                key, 
+                fileData, 
+                category,
+                displayName: fileData.detected_source || 'Unknown'
+            });
         }
     });
     
-    // Show mapped files section (if any)
-    if (mappedFiles.length > 0) {
-        const mappedSection = document.createElement('div');
-        mappedSection.className = 'uploaded-files-section';
-        mappedSection.innerHTML = '<h3 style="margin: 20px 0 12px 0; font-size: 0.9em; color: #666;">Mapped Documents</h3>';
+    // Show files in table format (if any)
+    if (allFiles.length > 0) {
+        const tableSection = document.createElement('div');
+        tableSection.className = 'uploaded-files-section';
+        tableSection.style.marginTop = '20px';
         
-        const badgesContainer = document.createElement('div');
-        badgesContainer.className = 'uploaded-badges-container';
+        // Create table
+        const table = document.createElement('table');
+        table.style.width = '100%';
+        table.style.borderCollapse = 'collapse';
+        table.style.marginTop = '10px';
+        table.style.backgroundColor = '#fff';
+        table.style.borderRadius = '4px';
+        table.style.overflow = 'hidden';
+        table.style.boxShadow = '0 1px 3px rgba(0,0,0,0.1)';
         
-        mappedFiles.forEach(({ expectedFile, fileData, key }) => {
+        // Table header
+        const thead = document.createElement('thead');
+        thead.style.backgroundColor = '#f5f5f5';
+        thead.innerHTML = `
+            <tr>
+                <th style="padding: 12px; text-align: left; border-bottom: 2px solid #ddd; font-weight: 600; color: #333; width: 40px;">Icon</th>
+                <th style="padding: 12px; text-align: left; border-bottom: 2px solid #ddd; font-weight: 600; color: #333;">Filename</th>
+                <th style="padding: 12px; text-align: left; border-bottom: 2px solid #ddd; font-weight: 600; color: #333;">Document Type</th>
+                <th style="padding: 12px; text-align: left; border-bottom: 2px solid #ddd; font-weight: 600; color: #333;">Type</th>
+                <th style="padding: 12px; text-align: left; border-bottom: 2px solid #ddd; font-weight: 600; color: #333;">Status</th>
+            </tr>
+        `;
+        table.appendChild(thead);
+        
+        // Table body
+        const tbody = document.createElement('tbody');
+        
+        allFiles.forEach(({ expectedFile, fileData, key, category, displayName }) => {
             const originalFilename = fileData.originalFilename || fileData.filename || key;
+            const fileType = fileData.type || 'pdf';
             const detectedSource = fileData.detected_source || 'unknown';
+            const row = document.createElement('tr');
+            row.style.borderBottom = '1px solid #eee';
+            row.style.cursor = 'pointer';
+            row.onmouseenter = () => {
+                row.style.backgroundColor = '#f9f9f9';
+            };
+            row.onmouseleave = () => {
+                row.style.backgroundColor = '#fff';
+            };
+            row.onclick = () => {
+                viewUnmatchedFile(key);
+            };
             
-            const badge = document.createElement('div');
-            badge.className = 'uploaded-file-badge matched-badge-item';
-            badge.innerHTML = `
-                <span class="file-icon-small">${getFileIcon(fileData.type || 'pdf')}</span>
-                <span class="badge-file-name" onclick="viewUnmatchedFile('${key}')" title="Click to view">
-                    ${escapeHtml(originalFilename)}
-                </span>
-                <span class="detected-source-badge" title="Mapped to: ${expectedFile.displayName}">${expectedFile.displayName}</span>
-                <span class="badge-check">✓</span>
+            // Determine status and category display
+            let statusHtml = '<span style="color: #28a745; font-weight: 500;">✓ Uploaded</span>';
+            let categoryDisplay = displayName || detectedSource;
+            if (category === 'mapped') {
+                categoryDisplay = expectedFile ? expectedFile.displayName : displayName;
+            } else if (category === 'miscellaneous') {
+                categoryDisplay = detectedSource;
+            } else {
+                categoryDisplay = detectedSource;
+            }
+            
+            row.innerHTML = `
+                <td style="padding: 12px; text-align: center;">${getFileIcon(fileType)}</td>
+                <td style="padding: 12px; color: #333; font-weight: 500;">${escapeHtml(originalFilename)}</td>
+                <td style="padding: 12px; color: #666;">${escapeHtml(categoryDisplay)}</td>
+                <td style="padding: 12px; color: #666; text-transform: uppercase;">${fileType}</td>
+                <td style="padding: 12px;">${statusHtml}</td>
             `;
-            badgesContainer.appendChild(badge);
+            
+            tbody.appendChild(row);
         });
         
-        mappedSection.appendChild(badgesContainer);
-        fileList.appendChild(mappedSection);
-    }
-    
-    // Show miscellaneous files section (if any)
-    if (miscellaneousFiles.length > 0) {
-        const miscellaneousSection = document.createElement('div');
-        miscellaneousSection.className = 'uploaded-files-section';
-        miscellaneousSection.innerHTML = '<h3 style="margin: 20px 0 12px 0; font-size: 0.9em; color: #666;">Miscellaneous</h3>';
-        
-        const badgesContainer = document.createElement('div');
-        badgesContainer.className = 'uploaded-badges-container';
-        
-        miscellaneousFiles.forEach(({ key, fileData }) => {
-            const detectedSource = fileData.detected_source || 'unknown';
-            const originalFilename = fileData.originalFilename || fileData.filename || key;
-            
-            const badge = document.createElement('div');
-            badge.className = 'uploaded-file-badge unmatched-badge-item';
-            badge.innerHTML = `
-                <span class="file-icon-small">${getFileIcon(fileData.type || 'pdf')}</span>
-                <span class="badge-file-name" onclick="viewUnmatchedFile('${key}')" title="Click to view">
-                    ${escapeHtml(originalFilename)}
-                </span>
-                <span class="detected-source-badge" title="Auto-detected type: ${detectedSource}">${detectedSource}</span>
-                <span class="badge-check">✓</span>
-            `;
-            badgesContainer.appendChild(badge);
-        });
-        
-        miscellaneousSection.appendChild(badgesContainer);
-        fileList.appendChild(miscellaneousSection);
-    }
-    
-    // Show other unmatched files (if any)
-    if (otherUnmatchedFiles.length > 0) {
-        const unmatchedSection = document.createElement('div');
-        unmatchedSection.className = 'uploaded-files-section';
-        unmatchedSection.innerHTML = '<h3 style="margin: 20px 0 12px 0; font-size: 0.9em; color: #666;">Other Uploaded Files</h3>';
-        
-        const badgesContainer = document.createElement('div');
-        badgesContainer.className = 'uploaded-badges-container';
-        
-        otherUnmatchedFiles.forEach(({ key, fileData }) => {
-            const detectedSource = fileData.detected_source || 'unknown';
-            const originalFilename = fileData.originalFilename || fileData.filename || key;
-            
-            const badge = document.createElement('div');
-            badge.className = 'uploaded-file-badge unmatched-badge-item';
-            badge.innerHTML = `
-                <span class="file-icon-small">${getFileIcon(fileData.type || 'pdf')}</span>
-                <span class="badge-file-name" onclick="viewUnmatchedFile('${key}')" title="Click to view">
-                    ${escapeHtml(originalFilename)}
-                </span>
-                <span class="detected-source-badge" title="Auto-detected type: ${detectedSource}">${detectedSource}</span>
-                <span class="unmatched-badge" title="No matching expected file type">Unmatched</span>
-                <span class="badge-check">✓</span>
-            `;
-            badgesContainer.appendChild(badge);
-        });
-        
-        unmatchedSection.appendChild(badgesContainer);
-        fileList.appendChild(unmatchedSection);
+        table.appendChild(tbody);
+        tableSection.appendChild(table);
+        fileList.appendChild(tableSection);
     }
 }
 
@@ -592,6 +754,21 @@ function handleFileUpload(file, expectedFileName) {
             
             // Show success message briefly
             showSuccess(`${expectedFile.displayName} uploaded successfully!`);
+            
+            // Show loading state for evidence completeness immediately
+            const evidenceLoading = document.getElementById('evidenceCompletenessLoading');
+            const checksSummary = document.getElementById('checksSummarySection');
+            if (evidenceLoading) {
+                evidenceLoading.style.display = 'block';
+            }
+            if (checksSummary) {
+                checksSummary.style.display = 'none';
+            }
+            
+            // Run evidence completeness check after upload
+            setTimeout(() => {
+                checkEvidenceCompleteness();
+            }, 500);
         }
     })
     .catch(err => {
@@ -608,15 +785,8 @@ function viewFile(expectedFileName) {
         return;
     }
     
-    // Make sure we're on the Files tab
-    switchTab('files');
-    
-    // Hide file list, show content view
-    fileListContainer.style.display = 'none';
-    fileContentView.style.display = 'block';
-    
-    // Display file content
-    displayContent(fileData);
+    // Open file content in new tab
+    openFileInNewTab(fileData);
 }
 
 function viewUnmatchedFile(fileKey) {
@@ -626,15 +796,250 @@ function viewUnmatchedFile(fileKey) {
         return;
     }
     
-    // Make sure we're on the Files tab
-    switchTab('files');
+    // Open file content in new tab
+    openFileInNewTab(fileData);
+}
+
+function openFileInNewTab(data) {
+    const filename = data.filename || data.originalFilename || 'Unknown';
     
-    // Hide file list, show content view
-    fileListContainer.style.display = 'none';
-    fileContentView.style.display = 'block';
+    let htmlContent = '';
     
-    // Display file content
-    displayContent(fileData);
+    if (data.type === 'image') {
+        // Display image content
+        htmlContent = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>${escapeHtml(filename)}</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        h1 {
+            margin-top: 0;
+            color: #333;
+            border-bottom: 2px solid #007bff;
+            padding-bottom: 10px;
+        }
+        .metadata {
+            margin-bottom: 30px;
+            padding: 20px;
+            background: #f9f9f9;
+            border-radius: 4px;
+        }
+        .metadata-item {
+            margin-bottom: 10px;
+        }
+        .image-container {
+            text-align: center;
+            margin-top: 20px;
+        }
+        img {
+            max-width: 100%;
+            height: auto;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>${escapeHtml(filename)}</h1>
+        <div class="metadata">
+            <h2>Image Information</h2>
+            <div class="metadata-item"><strong>Filename:</strong> ${escapeHtml(filename)}</div>
+            <div class="metadata-item"><strong>Dimensions:</strong> ${data.width} × ${data.height} pixels</div>
+            <div class="metadata-item"><strong>Format:</strong> ${data.format || 'Unknown'}</div>
+            ${data.size ? `<div class="metadata-item"><strong>Size:</strong> ${formatFileSize(data.size)}</div>` : ''}
+        </div>
+        <div class="image-container">
+            <img src="${data.data}" alt="${escapeHtml(filename)}">
+        </div>
+    </div>
+</body>
+</html>
+        `;
+    } else if (data.type === 'audio') {
+        // Display audio transcription
+        const transcription = data.transcription || (data.pages && data.pages.length > 0 ? data.pages[0].text : '');
+        htmlContent = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>${escapeHtml(filename)}</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        h1 {
+            margin-top: 0;
+            color: #333;
+            border-bottom: 2px solid #007bff;
+            padding-bottom: 10px;
+        }
+        .metadata {
+            margin-bottom: 30px;
+            padding: 20px;
+            background: #f9f9f9;
+            border-radius: 4px;
+        }
+        .metadata-item {
+            margin-bottom: 10px;
+        }
+        .transcription {
+            margin-top: 20px;
+            padding: 20px;
+            background: #f5f5f5;
+            border-radius: 4px;
+            white-space: pre-wrap;
+            line-height: 1.6;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>${escapeHtml(filename)}</h1>
+        <div class="metadata">
+            <h2>Audio Recording Information</h2>
+            <div class="metadata-item"><strong>Filename:</strong> ${escapeHtml(filename)}</div>
+            <div class="metadata-item"><strong>Type:</strong> Audio Recording</div>
+            ${transcription ? `<div class="metadata-item"><strong>Transcription Status:</strong> Complete</div>` : '<div class="metadata-item"><strong>Transcription Status:</strong> Not available</div>'}
+        </div>
+        ${transcription && transcription.trim() ? `
+        <div>
+            <h2>Transcription</h2>
+            <div class="transcription">${escapeHtml(transcription)}</div>
+        </div>
+        ` : '<div style="padding: 20px; text-align: center; color: #666;">No transcription available for this audio file.</div>'}
+    </div>
+</body>
+</html>
+        `;
+    } else {
+        // Display PDF content as continuous text
+        const metadata = data.metadata || {};
+        let contentHtml = '';
+        if (!data.pages || data.pages.length === 0) {
+            contentHtml = '<div style="padding: 20px; text-align: center; color: #666;">No content found in PDF.</div>';
+        } else {
+            // Combine all pages into one continuous text
+            const allText = data.pages
+                .map(page => page.text ? page.text.trim() : '')
+                .filter(text => text.length > 0)
+                .join('\n\n');
+            
+            if (allText) {
+                contentHtml = `<div style="white-space: pre-wrap; line-height: 1.8; font-size: 14px; color: #333;">${escapeHtml(allText)}</div>`;
+            } else {
+                contentHtml = '<div style="padding: 20px; text-align: center; color: #666;">No text content found in PDF.</div>';
+            }
+        }
+        
+        htmlContent = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>${escapeHtml(filename)}</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        h1 {
+            margin-top: 0;
+            color: #333;
+            border-bottom: 2px solid #007bff;
+            padding-bottom: 10px;
+        }
+        .metadata {
+            margin-bottom: 30px;
+            padding: 20px;
+            background: #f9f9f9;
+            border-radius: 4px;
+        }
+        .metadata-item {
+            margin-bottom: 10px;
+        }
+        h2 {
+            color: #333;
+            margin-top: 30px;
+            margin-bottom: 15px;
+        }
+        .content {
+            padding: 20px;
+            background: #fff;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>${escapeHtml(filename)}</h1>
+        <div class="metadata">
+            <h2>Document Information</h2>
+            <div class="metadata-item"><strong>Filename:</strong> ${escapeHtml(filename)}</div>
+            <div class="metadata-item"><strong>Pages:</strong> ${metadata.page_count || 0}</div>
+            ${metadata.title ? `<div class="metadata-item"><strong>Title:</strong> ${escapeHtml(metadata.title)}</div>` : ''}
+            ${metadata.author ? `<div class="metadata-item"><strong>Author:</strong> ${escapeHtml(metadata.author)}</div>` : ''}
+            ${metadata.subject ? `<div class="metadata-item"><strong>Subject:</strong> ${escapeHtml(metadata.subject)}</div>` : ''}
+        </div>
+        <div class="content">
+            ${contentHtml}
+        </div>
+    </div>
+</body>
+</html>
+        `;
+    }
+    
+    // Create a new window with the HTML content
+    const newWindow = window.open('', '_blank');
+    if (newWindow) {
+        newWindow.document.write(htmlContent);
+        newWindow.document.close();
+    } else {
+        showError('Please allow pop-ups to view files in a new tab.');
+    }
 }
 
 function showFileList() {
@@ -2242,10 +2647,19 @@ function checkEvidenceCompleteness() {
     // Check if files are uploaded
     if (!uploadedFiles || Object.keys(uploadedFiles).length === 0) {
         // No files uploaded yet, don't check
+        // Hide loading and checks summary, but keep section visible
+        const evidenceLoading = document.getElementById('evidenceCompletenessLoading');
+        const checksSummary = document.getElementById('checksSummarySection');
+        if (evidenceLoading) {
+            evidenceLoading.style.display = 'none';
+        }
+        if (checksSummary) {
+            checksSummary.style.display = 'none';
+        }
         return;
     }
     
-    // Show evidence completeness section in files tab
+    // Show evidence completeness section in files tab (always visible now)
     const evidenceSection = document.getElementById('evidenceCompletenessSection');
     const evidenceLoading = document.getElementById('evidenceCompletenessLoading');
     const checksSummary = document.getElementById('checksSummarySection');
@@ -2254,6 +2668,7 @@ function checkEvidenceCompleteness() {
         evidenceSection.style.display = 'block';
     }
     
+    // Show loading state
     if (evidenceLoading) {
         evidenceLoading.style.display = 'block';
     }
@@ -2302,21 +2717,34 @@ function checkEvidenceCompleteness() {
 function displayEvidenceCompleteness(data) {
     // Display in files tab (don't switch tabs)
     const checksSummarySection = document.getElementById('checksSummarySection');
-    const checksGrid = document.getElementById('checksGrid');
+    
+    // Store missing evidence globally for email modal
+    currentMissingEvidence = data.missing_evidence || [];
     
     // Display checks summary
     if (data.checks) {
         if (checksSummarySection) {
             checksSummarySection.style.display = 'block';
         }
-        if (checksGrid) {
-            renderChecksSummary(data.checks);
-        }
+        renderChecksSummary(data.checks);
     } else {
         if (checksSummarySection) {
             checksSummarySection.style.display = 'none';
         }
     }
+    
+    // Show/hide "Request More Details" button based on missing evidence
+    const requestButton = document.getElementById('requestMoreDetailsButton');
+    if (requestButton) {
+        if (currentMissingEvidence && currentMissingEvidence.length > 0) {
+            requestButton.style.display = 'inline-block';
+        } else {
+            requestButton.style.display = 'none';
+        }
+    }
+    
+    // Update email status indicators
+    updateEmailStatusIndicators();
     
     // Scroll to evidence completeness section
     const evidenceSection = document.getElementById('evidenceCompletenessSection');
@@ -2326,8 +2754,10 @@ function displayEvidenceCompleteness(data) {
 }
 
 function renderChecksSummary(checks) {
-    const checksGrid = document.getElementById('checksGrid');
-    checksGrid.innerHTML = '';
+    const checksTableBody = document.getElementById('checksTableBody');
+    if (!checksTableBody) return;
+    
+    checksTableBody.innerHTML = '';
     
     const checkItems = [
         { key: 'turn_by_turn_photos', label: 'Turn-by-Turn Incident Photos', icon: '📸' },
@@ -2342,26 +2772,30 @@ function renderChecksSummary(checks) {
         const check = checks[item.key];
         if (!check) return;
         
-        const checkCard = document.createElement('div');
-        checkCard.className = 'check-card';
+        const row = document.createElement('tr');
+        row.className = 'evidence-check-row';
+        row.setAttribute('data-evidence-key', item.key); // Store checkItem key for matching
         
         const statusClass = check.status === 'complete' ? 'status-complete' : 
                            check.status === 'partial' ? 'status-partial' : 'status-missing';
         const statusIcon = check.status === 'complete' ? '✅' : 
                          check.status === 'partial' ? '⚠️' : '❌';
+        const statusText = check.status === 'complete' ? 'Complete' : 
+                          check.status === 'partial' ? 'Partial' : 
+                          check.status === 'missing' ? 'Missing' : 'Unknown';
         
-        checkCard.innerHTML = `
-            <div class="check-card-header">
+        row.innerHTML = `
+            <td>
                 <span class="check-icon">${item.icon}</span>
-                <h4>${escapeHtml(item.label)}</h4>
-                <span class="check-status ${statusClass}">${statusIcon} ${check.status || 'unknown'}</span>
-            </div>
-            <div class="check-card-details">
-                <p>${escapeHtml(check.details || 'No details available')}</p>
-            </div>
+                <span class="check-label">${escapeHtml(item.label)}</span>
+            </td>
+            <td>
+                <span class="check-status ${statusClass}">${statusIcon} ${statusText}</span>
+            </td>
+            <td class="check-details-cell">${escapeHtml(check.details || 'No details available')}</td>
         `;
         
-        checksGrid.appendChild(checkCard);
+        checksTableBody.appendChild(row);
     });
 }
 
@@ -3572,10 +4006,13 @@ function showSuccessToast(message) {
         padding: 15px 25px;
         border-radius: 4px;
         box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-        z-index: 10000;
+        z-index: 99999;
         font-size: 14px;
         font-weight: 500;
         animation: slideIn 0.3s ease-out;
+        backdrop-filter: none;
+        -webkit-backdrop-filter: none;
+        isolation: isolate;
     `;
     
     // Add animation
@@ -3808,6 +4245,16 @@ function handleBulkUpload(files) {
             
             // Automatically check evidence completeness after files are uploaded
             if (successCount > 0) {
+                // Show loading state for evidence completeness immediately
+                const evidenceLoading = document.getElementById('evidenceCompletenessLoading');
+                const checksSummary = document.getElementById('checksSummarySection');
+                if (evidenceLoading) {
+                    evidenceLoading.style.display = 'block';
+                }
+                if (checksSummary) {
+                    checksSummary.style.display = 'none';
+                }
+                
                 setTimeout(() => {
                     checkEvidenceCompleteness();
                 }, 500);
@@ -3882,6 +4329,517 @@ function findExpectedFileForType(detectedType, filename) {
     return null;
 }
 
+// Default contacts for email requests
+const defaultContacts = [
+    { name: 'John Doe', email: 'john.doe@example.com', role: 'Claimant' },
+    { name: 'Jane Smith', email: 'jane.smith@example.com', role: 'Other Driver' },
+    { name: 'Sarah Johnson', email: 'sarah.johnson@insurance.com', role: 'FNOL Agent' }
+];
+
+let availableContacts = [...defaultContacts];
+
+// Email Request Modal Functions
+function openEmailRequestModal() {
+    const modal = document.getElementById('emailRequestModal');
+    if (!modal) return;
+    
+    // Reset form
+    const missingEvidenceList = document.getElementById('missingEvidenceList');
+    const contactSelect = document.getElementById('contactSelect');
+    const emailDraftTextarea = document.getElementById('emailDraftTextarea');
+    const addContactForm = document.getElementById('addContactForm');
+    
+    // Populate missing evidence checkboxes
+    if (missingEvidenceList) {
+        missingEvidenceList.innerHTML = '';
+        if (currentMissingEvidence && currentMissingEvidence.length > 0) {
+            currentMissingEvidence.forEach((evidence, index) => {
+                const item = document.createElement('div');
+                item.className = 'missing-evidence-item';
+                item.innerHTML = `
+                    <input type="checkbox" id="evidence_${index}" value="${index}" checked>
+                    <label for="evidence_${index}" class="missing-evidence-item-label">
+                        <span class="evidence-name">${escapeHtml(evidence.evidence_needed || 'Unknown')}</span>
+                    </label>
+                `;
+                missingEvidenceList.appendChild(item);
+            });
+        } else {
+            missingEvidenceList.innerHTML = '<p style="color: #666; font-size: 0.9em;">No missing evidence items available.</p>';
+        }
+    }
+    
+    // Populate contact dropdown
+    if (contactSelect) {
+        contactSelect.innerHTML = '<option value="">Select a contact...</option>';
+        availableContacts.forEach((contact, index) => {
+            const option = document.createElement('option');
+            option.value = index;
+            option.textContent = `${contact.name} (${contact.email}) - ${contact.role}`;
+            option.dataset.contact = JSON.stringify(contact);
+            contactSelect.appendChild(option);
+        });
+    }
+    
+    // Clear email draft
+    if (emailDraftTextarea) {
+        emailDraftTextarea.value = '';
+        emailDraftTextarea.style.display = 'block';
+    }
+    
+    // Ensure loading is hidden and button is visible
+    const emailDraftLoading = document.getElementById('emailDraftLoading');
+    if (emailDraftLoading) {
+        emailDraftLoading.style.display = 'none';
+    }
+    const generateDraftButton = document.getElementById('generateDraftButton');
+    if (generateDraftButton) {
+        generateDraftButton.style.display = 'block';
+    }
+    
+    // Hide add contact form
+    if (addContactForm) {
+        addContactForm.style.display = 'none';
+    }
+    
+    // Show modal
+    modal.style.display = 'block';
+}
+
+function closeEmailRequestModal() {
+    const modal = document.getElementById('emailRequestModal');
+    if (modal) {
+        modal.style.display = 'none';
+    }
+    
+    // Reset form
+    const emailDraftLoading = document.getElementById('emailDraftLoading');
+    if (emailDraftLoading) {
+        emailDraftLoading.style.display = 'none';
+    }
+    const generateDraftButton = document.getElementById('generateDraftButton');
+    if (generateDraftButton) {
+        generateDraftButton.style.display = 'block';
+    }
+    const emailDraftTextarea = document.getElementById('emailDraftTextarea');
+    if (emailDraftTextarea) {
+        emailDraftTextarea.style.display = 'block';
+    }
+}
+
+function onContactChange() {
+    const contactSelect = document.getElementById('contactSelect');
+    if (!contactSelect || !contactSelect.value) return;
+    
+    // Contact changed, could trigger auto-draft generation if needed
+    // For now, just clear the draft
+    const emailDraftTextarea = document.getElementById('emailDraftTextarea');
+    if (emailDraftTextarea) {
+        emailDraftTextarea.value = '';
+    }
+}
+
+function showAddContactForm() {
+    const addContactForm = document.getElementById('addContactForm');
+    if (addContactForm) {
+        addContactForm.style.display = 'block';
+    }
+}
+
+function hideAddContactForm() {
+    const addContactForm = document.getElementById('addContactForm');
+    const newContactName = document.getElementById('newContactName');
+    const newContactEmail = document.getElementById('newContactEmail');
+    const newContactRole = document.getElementById('newContactRole');
+    
+    if (addContactForm) {
+        addContactForm.style.display = 'none';
+    }
+    
+    // Clear form
+    if (newContactName) newContactName.value = '';
+    if (newContactEmail) newContactEmail.value = '';
+    if (newContactRole) newContactRole.value = '';
+}
+
+function addContact() {
+    const newContactName = document.getElementById('newContactName');
+    const newContactEmail = document.getElementById('newContactEmail');
+    const newContactRole = document.getElementById('newContactRole');
+    const contactSelect = document.getElementById('contactSelect');
+    
+    if (!newContactName || !newContactEmail) return;
+    
+    const name = newContactName.value.trim();
+    const email = newContactEmail.value.trim();
+    const role = newContactRole ? newContactRole.value.trim() : 'Custom';
+    
+    if (!name || !email) {
+        showError('Please provide both name and email.');
+        return;
+    }
+    
+    // Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+        showError('Please provide a valid email address.');
+        return;
+    }
+    
+    // Add contact
+    const newContact = { name, email, role: role || 'Custom' };
+    availableContacts.push(newContact);
+    
+    // Add to dropdown
+    if (contactSelect) {
+        const option = document.createElement('option');
+        option.value = availableContacts.length - 1;
+        option.textContent = `${newContact.name} (${newContact.email}) - ${newContact.role}`;
+        option.dataset.contact = JSON.stringify(newContact);
+        option.selected = true;
+        contactSelect.appendChild(option);
+    }
+    
+    // Hide form
+    hideAddContactForm();
+}
+
+function generateEmailDraft() {
+    const missingEvidenceList = document.getElementById('missingEvidenceList');
+    const contactSelect = document.getElementById('contactSelect');
+    const emailDraftTextarea = document.getElementById('emailDraftTextarea');
+    const emailDraftLoading = document.getElementById('emailDraftLoading');
+    
+    if (!missingEvidenceList || !contactSelect || !emailDraftTextarea) return;
+    
+    // Get selected evidence items
+    const selectedCheckboxes = missingEvidenceList.querySelectorAll('input[type="checkbox"]:checked');
+    if (selectedCheckboxes.length === 0) {
+        showError('Please select at least one missing evidence item.');
+        return;
+    }
+    
+    const selectedEvidence = Array.from(selectedCheckboxes).map(cb => {
+        const index = parseInt(cb.value);
+        return currentMissingEvidence[index];
+    });
+    
+    // Get selected contact
+    if (!contactSelect.value) {
+        showError('Please select a contact.');
+        return;
+    }
+    
+    const contactIndex = parseInt(contactSelect.value);
+    const contact = availableContacts[contactIndex];
+    
+    if (!contact) {
+        showError('Invalid contact selected.');
+        return;
+    }
+    
+    // Show loading
+    if (emailDraftLoading) {
+        emailDraftLoading.style.display = 'block';
+    }
+    emailDraftTextarea.style.display = 'none';
+    const generateDraftButton = document.getElementById('generateDraftButton');
+    if (generateDraftButton) {
+        generateDraftButton.style.display = 'none';
+    }
+    
+    // Prepare request data
+    const requestData = {
+        selected_evidence: selectedEvidence,
+        contact: contact,
+        claim_context: '' // Could be enhanced with actual claim context
+    };
+    
+    // Log request details
+    console.log('[EMAIL DRAFT] Starting email draft generation');
+    console.log('[EMAIL DRAFT] Request URL: /generate-email-draft');
+    console.log('[EMAIL DRAFT] Request data:', {
+        selected_evidence_count: requestData.selected_evidence.length,
+        contact: requestData.contact,
+        has_claim_context: !!requestData.claim_context
+    });
+    
+    // Call backend to generate draft
+    fetch('/generate-email-draft', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(requestData)
+    })
+    .then(response => {
+        console.log('[EMAIL DRAFT] Response received:', {
+            status: response.status,
+            statusText: response.statusText,
+            ok: response.ok,
+            headers: Object.fromEntries(response.headers.entries())
+        });
+        
+        if (!response.ok) {
+            // Try to parse error message from response
+            return response.json().then(data => {
+                console.error('[EMAIL DRAFT ERROR] Server error response:', {
+                    status: response.status,
+                    statusText: response.statusText,
+                    error: data.error,
+                    full_data: data
+                });
+                throw new Error(data.error || `Server error: ${response.status} ${response.statusText}`);
+            }).catch(parseError => {
+                console.error('[EMAIL DRAFT ERROR] Failed to parse error response:', parseError);
+                console.error('[EMAIL DRAFT ERROR] Response status:', response.status, response.statusText);
+                throw new Error(`Server error: ${response.status} ${response.statusText}`);
+            });
+        }
+        return response.json();
+    })
+    .then(data => {
+        console.log('[EMAIL DRAFT] Success response received:', {
+            has_draft: !!data.draft,
+            draft_length: data.draft ? data.draft.length : 0,
+            success: data.success,
+            has_error: !!data.error
+        });
+        
+        if (emailDraftLoading) {
+            emailDraftLoading.style.display = 'none';
+        }
+        emailDraftTextarea.style.display = 'block';
+        const generateDraftButton = document.getElementById('generateDraftButton');
+        if (generateDraftButton) {
+            generateDraftButton.style.display = 'block';
+        }
+        
+        if (data.error) {
+            console.error('[EMAIL DRAFT ERROR] Error in response data:', data.error);
+            showError(data.error);
+        } else if (data.draft) {
+            console.log('[EMAIL DRAFT] Draft generated successfully');
+            emailDraftTextarea.value = data.draft;
+        } else {
+            console.error('[EMAIL DRAFT ERROR] No draft content in response:', data);
+            showError('Failed to generate email draft. No draft content received.');
+        }
+    })
+    .catch(err => {
+        console.error('[EMAIL DRAFT ERROR] Fetch error caught:', {
+            message: err.message,
+            stack: err.stack,
+            name: err.name,
+            error: err
+        });
+        
+        if (emailDraftLoading) {
+            emailDraftLoading.style.display = 'none';
+        }
+        emailDraftTextarea.style.display = 'block';
+        const generateDraftButton = document.getElementById('generateDraftButton');
+        if (generateDraftButton) {
+            generateDraftButton.style.display = 'block';
+        }
+        const errorMessage = err.message || 'Failed to generate email draft. Please try again.';
+        console.error('[EMAIL DRAFT ERROR] Final error message:', errorMessage);
+        showError(errorMessage);
+    });
+}
+
+function sendEmailRequest() {
+    const missingEvidenceList = document.getElementById('missingEvidenceList');
+    const contactSelect = document.getElementById('contactSelect');
+    const emailDraftTextarea = document.getElementById('emailDraftTextarea');
+    
+    if (!missingEvidenceList || !contactSelect || !emailDraftTextarea) return;
+    
+    // Get selected evidence items
+    const selectedCheckboxes = missingEvidenceList.querySelectorAll('input[type="checkbox"]:checked');
+    if (selectedCheckboxes.length === 0) {
+        showError('Please select at least one missing evidence item.');
+        return;
+    }
+    
+    const selectedEvidence = Array.from(selectedCheckboxes).map(cb => {
+        const index = parseInt(cb.value);
+        return currentMissingEvidence[index];
+    });
+    
+    // Get selected contact
+    if (!contactSelect.value) {
+        showError('Please select a contact.');
+        return;
+    }
+    
+    const contactIndex = parseInt(contactSelect.value);
+    const contact = availableContacts[contactIndex];
+    
+    if (!contact) {
+        showError('Invalid contact selected.');
+        return;
+    }
+    
+    // Get email body
+    const emailBody = emailDraftTextarea.value.trim();
+    if (!emailBody) {
+        showError('Please generate or enter an email draft.');
+        return;
+    }
+    
+    // Prepare request data
+    const requestData = {
+        to: contact.email,
+        subject: 'Request for Additional Evidence - Auto Insurance Claim',
+        body: emailBody,
+        selected_evidence: selectedEvidence
+    };
+    
+    // Call backend to send email
+    fetch('/send-email-request', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(requestData)
+    })
+    .then(response => {
+        // Check if response is OK before parsing JSON
+        if (!response.ok) {
+            // Try to parse error response
+            return response.json().then(errorData => {
+                throw new Error(errorData.error || `HTTP ${response.status}: Failed to send email`);
+            }).catch(() => {
+                // If JSON parsing fails, throw with status text
+                throw new Error(`HTTP ${response.status}: ${response.statusText || 'Failed to send email'}`);
+            });
+        }
+        return response.json();
+    })
+    .then(data => {
+        if (data.error) {
+            showError(data.error);
+        } else if (data.success) {
+            // Track sent emails using checkItem keys
+            selectedEvidence.forEach(evidence => {
+                const evidenceNeeded = evidence.evidence_needed || 'unknown';
+                const key = mapEvidenceNeededToKey(evidenceNeeded); // Map to checkItem key
+                if (!sentEmails[key]) {
+                    sentEmails[key] = [];
+                }
+                sentEmails[key].push({
+                    to: contact.email,
+                    to_name: contact.name,
+                    sent_at: data.sent_at || new Date().toISOString(),
+                    message_id: data.message_id
+                });
+            });
+            
+            // Update UI to show email status
+            updateEmailStatusIndicators();
+            
+            // Show success message
+            showSuccessMessage(`Email sent successfully to ${contact.name} (${contact.email})`);
+            
+            // Close modal after a short delay
+            setTimeout(() => {
+                closeEmailRequestModal();
+            }, 1500);
+        } else {
+            showError('Failed to send email.');
+        }
+    })
+    .catch(err => {
+        // Display the actual error message from backend or network error
+        const errorMessage = err.message || 'Failed to send email. Please try again.';
+        showError(errorMessage);
+        console.error('Email send error:', err);
+    });
+}
+
+function updateEmailStatusIndicators() {
+    // Update evidence completeness table to show email status
+    const checksTableBody = document.getElementById('checksTableBody');
+    if (!checksTableBody) return;
+    
+    const rows = checksTableBody.querySelectorAll('tr');
+    rows.forEach(row => {
+        // Remove existing email sent badge to avoid duplicates
+        const existingEmailBadge = row.querySelector('.status-email-sent');
+        if (existingEmailBadge) {
+            existingEmailBadge.remove();
+        }
+        
+        // Get the evidence key from data attribute
+        const evidenceKey = row.getAttribute('data-evidence-key');
+        if (!evidenceKey) return;
+        
+        // Check if email was sent for this evidence key
+        const emailInfo = sentEmails[evidenceKey];
+        const hasEmailSent = emailInfo && emailInfo.length > 0;
+        
+        // Get the status cell (second column)
+        const statusCell = row.querySelector('td:nth-child(2)');
+        if (!statusCell) return;
+        
+        // If email was sent, add an "Email Sent" badge
+        if (hasEmailSent) {
+            // Get the most recent email
+            const latestEmail = emailInfo[emailInfo.length - 1];
+            const sentDate = latestEmail.sent_at ? new Date(latestEmail.sent_at).toLocaleDateString() : '';
+            const recipientName = latestEmail.to_name || latestEmail.to || 'recipient';
+            
+            // Create email sent badge
+            const emailSentBadge = document.createElement('span');
+            emailSentBadge.className = 'check-status status-email-sent';
+            emailSentBadge.innerHTML = '📧 Email Sent';
+            emailSentBadge.title = `Email sent to ${recipientName}${sentDate ? ` on ${sentDate}` : ''}`;
+            
+            // Check if status cell already has a container
+            let statusContainer = statusCell.querySelector('.status-badge-container');
+            if (!statusContainer) {
+                // Get existing status badge(s)
+                const existingStatuses = statusCell.querySelectorAll('.check-status:not(.status-email-sent)');
+                
+                if (existingStatuses.length > 0) {
+                    // Create container and move existing badges into it
+                    statusContainer = document.createElement('div');
+                    statusContainer.className = 'status-badge-container';
+                    
+                    // Insert container before first existing status
+                    existingStatuses[0].parentNode.insertBefore(statusContainer, existingStatuses[0]);
+                    
+                    // Move all existing status badges into container
+                    existingStatuses.forEach(status => {
+                        statusContainer.appendChild(status);
+                    });
+                } else {
+                    // No existing status badges, just create container
+                    statusContainer = document.createElement('div');
+                    statusContainer.className = 'status-badge-container';
+                    statusCell.appendChild(statusContainer);
+                }
+            }
+            
+            // Add email sent badge to container
+            statusContainer.appendChild(emailSentBadge);
+        }
+    });
+}
+
+function showSuccessMessage(message) {
+    // Create a temporary success message
+    const successDiv = document.createElement('div');
+    successDiv.style.cssText = 'position: fixed; top: 20px; right: 20px; background: #4caf50; color: white; padding: 15px 20px; border-radius: 6px; z-index: 99999; box-shadow: 0 4px 12px rgba(0,0,0,0.2); backdrop-filter: none; -webkit-backdrop-filter: none; isolation: isolate;';
+    successDiv.textContent = message;
+    document.body.appendChild(successDiv);
+    
+    setTimeout(() => {
+        successDiv.remove();
+    }, 3000);
+}
+
 // Make functions globally accessible
 window.triggerFileUpload = triggerFileUpload;
 window.triggerBulkUpload = triggerBulkUpload;
@@ -3907,7 +4865,16 @@ window.scrollToFact = scrollToFact;
 window.generateClaimRationale = generateClaimRationale;
 window.openSupervisorEscalationModal = openSupervisorEscalationModal;
 window.closeSupervisorEscalationModal = closeSupervisorEscalationModal;
+window.openEmailRequestModal = openEmailRequestModal;
+window.closeEmailRequestModal = closeEmailRequestModal;
+window.onContactChange = onContactChange;
+window.showAddContactForm = showAddContactForm;
+window.hideAddContactForm = hideAddContactForm;
+window.addContact = addContact;
+window.generateEmailDraft = generateEmailDraft;
+window.sendEmailRequest = sendEmailRequest;
 window.sendToSupervisor = sendToSupervisor;
 window.downloadClaimRationalePDF = downloadClaimRationalePDF;
 window.acceptConflictVersion = acceptConflictVersion;
+window.closeFileViewModal = closeFileViewModal;
 
