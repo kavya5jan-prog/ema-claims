@@ -256,15 +256,15 @@ header p {
     border: 2px solid transparent;
 }
 
-/* Completed state - Green */
+/* Completed state - Teal */
 .step-item.completed .step-icon {
-    background: #28a745;
+    background: #14b8a6;
     color: white;
-    border-color: #28a745;
+    border-color: #14b8a6;
 }
 
 .step-item.completed .step-label {
-    color: #28a745;
+    color: #14b8a6;
     font-weight: 600;
 }
 
@@ -314,8 +314,8 @@ header p {
 }
 
 .step-item:hover:not(.locked).completed .step-icon {
-    background: #218838;
-    border-color: #218838;
+    background: #0d9488;
+    border-color: #0d9488;
 }
 
 .step-item:hover:not(.locked).active .step-icon {
