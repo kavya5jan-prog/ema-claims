@@ -1,11 +1,12 @@
 services:
   - type: web
-    name: auto-claims
+    name: ema-claims
     env: python
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn app:app
+    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT
     envVars:
       - key: OPENAI_API_KEY
         sync: false
     healthCheckPath: /
+    plan: free
 
