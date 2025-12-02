@@ -85,15 +85,19 @@ def extract_facts():
             return jsonify(result), 200
         
         except MemoryError as mem_error:
-            error_msg = f'Insufficient memory to process request. Please reduce the number of files or images and try again.'
+            error_msg = 'Insufficient memory to process request. Please reduce the number of files or images and try again.'
             print(f"Memory error in fact extraction: {mem_error}")
+            import traceback
+            print(f"ERROR: Fact extraction traceback: {traceback.format_exc()}")
             return jsonify({'error': error_msg}), 500
         except Exception as e:
+            # The error message from extract_facts_from_documents already includes context
             error_msg = str(e)
             print(f"ERROR: Fact extraction error: {error_msg}")  # Log for debugging
             import traceback
             print(f"ERROR: Fact extraction traceback: {traceback.format_exc()}")
-            return jsonify({'error': f'Fact extraction failed: {error_msg}'}), 500
+            # Return error message as-is (it already includes "Fact extraction failed:" prefix if needed)
+            return jsonify({'error': error_msg}), 500
     
     except MemoryError as mem_error:
         error_msg = f'Insufficient memory to process request. Please reduce the number of files or images and try again.'

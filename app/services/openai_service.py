@@ -6,6 +6,7 @@ import re
 import logging
 from typing import Optional, Dict, Any, List, Union
 from openai import OpenAI
+from openai import APITimeoutError, APIConnectionError, RateLimitError, APIError
 from app.config import Config
 
 # Set up logging
@@ -40,8 +41,9 @@ class OpenAIService:
         system_prompt: Optional[str] = None,
         response_format: Optional[Dict[str, str]] = None,
         max_tokens: int = 4000,
-        model: str = "gpt-4o"
-    ) -> Optional[str]:
+        model: str = "gpt-4o",
+        timeout: Optional[float] = 180.0
+    ) -> str:
         """
         Make a call to OpenAI API.
         
@@ -51,15 +53,24 @@ class OpenAIService:
             response_format: Optional response format (e.g., {"type": "json_object"})
             max_tokens: Maximum tokens in response
             model: Model to use
+            timeout: Request timeout in seconds (default: 180.0)
             
         Returns:
-            Response text or None if error
+            Response text
+            
+        Raises:
+            ValueError: If client is not initialized or API returns invalid response
+            TypeError: If API returns unexpected type
+            APITimeoutError: If request times out
+            RateLimitError: If rate limit is exceeded
+            APIConnectionError: If connection fails
+            APIError: For other API errors
         """
         if not self.client:
-            error_msg = "OpenAI client is not initialized"
+            error_msg = "OpenAI client is not initialized. Please check OPENAI_API_KEY environment variable."
             logger.error(error_msg)
             print(f"ERROR: {error_msg}")
-            return None
+            raise ValueError(error_msg)
         
         try:
             messages = []
@@ -79,14 +90,15 @@ class OpenAIService:
             params = {
                 "model": model,
                 "messages": messages,
-                "max_tokens": max_tokens
+                "max_tokens": max_tokens,
+                "timeout": timeout
             }
             
             if response_format:
                 params["response_format"] = response_format
             
-            logger.info(f"Calling OpenAI API: model={model}, max_tokens={max_tokens}, response_format={response_format}")
-            print(f"DEBUG: Calling OpenAI API with model={model}, max_tokens={max_tokens}, response_format={response_format}")
+            logger.info(f"Calling OpenAI API: model={model}, max_tokens={max_tokens}, timeout={timeout}s, response_format={response_format}")
+            print(f"DEBUG: Calling OpenAI API with model={model}, max_tokens={max_tokens}, timeout={timeout}s, response_format={response_format}")
             
             response = self.client.chat.completions.create(**params)
             
@@ -137,6 +149,26 @@ class OpenAIService:
             print(f"DEBUG: OpenAI API call successful, response length: {len(content)}")
             return content
         
+        except APITimeoutError as e:
+            error_msg = f"OpenAI API request timed out after {timeout} seconds. The request may be too large or the API is slow. Please try again or reduce the number of files/images."
+            logger.error(error_msg, exc_info=True)
+            print(f"ERROR: {error_msg}")
+            raise ValueError(error_msg) from e
+        except RateLimitError as e:
+            error_msg = "OpenAI API rate limit exceeded. Please wait a moment and try again."
+            logger.error(error_msg, exc_info=True)
+            print(f"ERROR: {error_msg}")
+            raise ValueError(error_msg) from e
+        except APIConnectionError as e:
+            error_msg = f"OpenAI API connection failed. Please check your internet connection and try again. Error: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            print(f"ERROR: {error_msg}")
+            raise ValueError(error_msg) from e
+        except APIError as e:
+            error_msg = f"OpenAI API error: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            print(f"ERROR: {error_msg}")
+            raise ValueError(error_msg) from e
         except ValueError as ve:
             # Re-raise ValueError (e.g., when content is None) so it can be handled upstream
             logger.error(f"ValueError in call_openai: {str(ve)}")
@@ -146,12 +178,12 @@ class OpenAIService:
             logger.error(f"TypeError in call_openai: {str(te)}")
             raise
         except Exception as e:
-            error_msg = f"OpenAI API call failed: {str(e)}"
+            error_msg = f"Unexpected error during OpenAI API call: {str(e)}"
             logger.error(error_msg, exc_info=True)
             print(f"ERROR: {error_msg}")
             import traceback
             print(f"ERROR: Traceback: {traceback.format_exc()}")
-            return None
+            raise ValueError(error_msg) from e
     
     def parse_json_response(
         self,
@@ -225,21 +257,22 @@ class OpenAIService:
                         error_msg = f"Fallback JSON parsing also failed: {str(fallback_error)}"
                         logger.error(error_msg)
                         print(f"ERROR: {error_msg}")
-                        raise ValueError(f"OpenAI API error: the JSON object must be str, bytes or bytearray, not NoneType. Original error: {str(fallback_error)}")
+                        raise ValueError(f"OpenAI API error: Failed to parse JSON response using fallback extraction. Original error: {str(fallback_error)}")
                     except Exception as fallback_error:
                         error_msg = f"Unexpected error during fallback parsing: {str(fallback_error)}"
                         logger.error(error_msg, exc_info=True)
                         print(f"ERROR: {error_msg}")
                         raise ValueError(f"OpenAI API error: {error_msg}")
-            raise ValueError(f"OpenAI API error: the JSON object must be str, bytes or bytearray, not NoneType. JSON decode error: {str(e)}")
+            raise ValueError(f"OpenAI API error: Failed to parse JSON response. JSON decode error: {str(e)}")
     
     def call_with_json_response(
         self,
         system_prompt: Optional[str],
         user_content: Union[str, List[Dict[str, Any]]],
         max_tokens: int = 4000,
-        model: str = "gpt-4o"
-    ) -> Optional[Dict[str, Any]]:
+        model: str = "gpt-4o",
+        timeout: Optional[float] = 180.0
+    ) -> Dict[str, Any]:
         """
         Call OpenAI and parse JSON response.
         
@@ -248,12 +281,17 @@ class OpenAIService:
             user_content: User content
             max_tokens: Maximum tokens
             model: Model to use
+            timeout: Request timeout in seconds (default: 180.0)
             
         Returns:
-            Parsed JSON dict or None if error
+            Parsed JSON dict
+            
+        Raises:
+            ValueError: If API call fails or JSON parsing fails
+            TypeError: If response type is unexpected
         """
-        logger.info(f"call_with_json_response called with system_prompt={system_prompt is not None}, user_content type={type(user_content).__name__}")
-        print(f"DEBUG: call_with_json_response called with system_prompt={system_prompt is not None}, user_content type={type(user_content).__name__}")
+        logger.info(f"call_with_json_response called with system_prompt={system_prompt is not None}, user_content type={type(user_content).__name__}, timeout={timeout}s")
+        print(f"DEBUG: call_with_json_response called with system_prompt={system_prompt is not None}, user_content type={type(user_content).__name__}, timeout={timeout}s")
         
         try:
             response_text = self.call_openai(
@@ -261,27 +299,25 @@ class OpenAIService:
                 user_content=user_content,
                 response_format={"type": "json_object"},
                 max_tokens=max_tokens,
-                model=model
+                model=model,
+                timeout=timeout
             )
-        except (ValueError, TypeError) as e:
-            # Re-raise these as they indicate API issues
-            logger.error(f"call_openai raised {type(e).__name__}: {str(e)}")
-            raise ValueError(f"OpenAI API error: {str(e)}")
+        except ValueError as e:
+            # Re-raise ValueError with context
+            logger.error(f"call_openai raised ValueError: {str(e)}")
+            raise ValueError(f"OpenAI API error: {str(e)}") from e
+        except TypeError as e:
+            # Re-raise TypeError
+            logger.error(f"call_openai raised TypeError: {str(e)}")
+            raise TypeError(f"OpenAI API error: {str(e)}") from e
         except Exception as e:
             error_msg = f"Unexpected error in call_openai: {str(e)}"
             logger.error(error_msg, exc_info=True)
-            raise ValueError(f"OpenAI API error: {error_msg}")
+            raise ValueError(f"OpenAI API error: {error_msg}") from e
         
-        if response_text:
-            preview = response_text[:100] if isinstance(response_text, str) else str(response_text)[:100]
-        else:
-            preview = None
-        logger.debug(f"call_openai returned response_text type: {type(response_text).__name__}, is None: {response_text is None}, preview: {preview}")
-        print(f"DEBUG: call_openai returned response_text type: {type(response_text).__name__}, preview: {preview}")
-        
-        # Defensive check: validate response before parsing
+        # Validate response (should never be None now since call_openai raises exceptions)
         if response_text is None:
-            error_msg = "OpenAI API returned None response. The API call may have failed or the response was empty."
+            error_msg = "OpenAI API returned None response. This should not happen - please report this error."
             logger.error(error_msg)
             print(f"ERROR: {error_msg}")
             raise ValueError(f"OpenAI API error: {error_msg}")
@@ -291,6 +327,10 @@ class OpenAIService:
             logger.error(error_msg)
             print(f"ERROR: {error_msg}")
             raise TypeError(f"OpenAI API error: {error_msg}")
+        
+        preview = response_text[:100] if len(response_text) > 100 else response_text
+        logger.debug(f"call_openai returned response_text type: {type(response_text).__name__}, length: {len(response_text)}, preview: {preview}")
+        print(f"DEBUG: call_openai returned response_text type: {type(response_text).__name__}, length: {len(response_text)}, preview: {preview}")
         
         try:
             result = self.parse_json_response(response_text, fallback_parsing=True)
@@ -311,8 +351,9 @@ class OpenAIService:
         system_prompt: Optional[str],
         user_content: Union[str, List[Dict[str, Any]]],
         max_tokens: int = 2000,
-        model: str = "gpt-4o"
-    ) -> Optional[str]:
+        model: str = "gpt-4o",
+        timeout: Optional[float] = 120.0
+    ) -> str:
         """
         Call OpenAI and return text response (no JSON format).
         
@@ -321,16 +362,22 @@ class OpenAIService:
             user_content: User content
             max_tokens: Maximum tokens
             model: Model to use
+            timeout: Request timeout in seconds (default: 120.0)
             
         Returns:
-            Response text or None if error
+            Response text
+            
+        Raises:
+            ValueError: If API call fails
+            TypeError: If response type is unexpected
         """
         return self.call_openai(
             system_prompt=system_prompt,
             user_content=user_content,
             response_format=None,
             max_tokens=max_tokens,
-            model=model
+            model=model,
+            timeout=timeout
         )
 
 

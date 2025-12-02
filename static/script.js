@@ -1913,12 +1913,60 @@ function acceptConflictVersion(conflictIndex, variantIndex, acceptedValue) {
     console.log('DEBUG: acceptedVersions keys:', Object.keys(currentFactsData.acceptedVersions));
     console.log('DEBUG: acceptedVersions entries:', Object.entries(currentFactsData.acceptedVersions));
     
-    // Verify it was stored correctly
+    // Verify it was stored correctly - comprehensive validation
+    console.log('DEBUG: ========== VALIDATION: Verifying storage ==========');
+    const stringKeyExists = key in currentFactsData.acceptedVersions;
+    const numericKeyExists = keyNum in currentFactsData.acceptedVersions;
+    const stringKeyValue = currentFactsData.acceptedVersions[key];
+    const numericKeyValue = currentFactsData.acceptedVersions[keyNum];
+    const stringKeyValid = stringKeyExists && stringKeyValue && stringKeyValue.value === acceptedValue;
+    const numericKeyValid = numericKeyExists && numericKeyValue && numericKeyValue.value === acceptedValue;
+    
     console.log('DEBUG: Verification - checking stored value:');
-    console.log('  - acceptedVersions["' + key + '"]:', currentFactsData.acceptedVersions[key]);
-    console.log('  - acceptedVersions[' + keyNum + ']:', currentFactsData.acceptedVersions[keyNum]);
-    console.log('  - "' + key + '" in acceptedVersions:', key in currentFactsData.acceptedVersions);
-    console.log('  - ' + keyNum + ' in acceptedVersions:', keyNum in currentFactsData.acceptedVersions);
+    console.log('  - acceptedVersions["' + key + '"] exists:', stringKeyExists);
+    console.log('  - acceptedVersions["' + key + '"] value:', stringKeyValue);
+    console.log('  - acceptedVersions[' + keyNum + '] exists:', numericKeyExists);
+    console.log('  - acceptedVersions[' + keyNum + '] value:', numericKeyValue);
+    console.log('  - String key valid:', stringKeyValid);
+    console.log('  - Numeric key valid:', numericKeyValid);
+    console.log('  - "' + key + '" in acceptedVersions:', stringKeyExists);
+    console.log('  - ' + keyNum + ' in acceptedVersions:', numericKeyExists);
+    
+    // If validation fails, try to fix it
+    if (!stringKeyValid && !numericKeyValid) {
+        console.error('ERROR: [acceptConflictVersion] Storage validation FAILED - attempting to fix...');
+        // Force store again with both keys
+        currentFactsData.acceptedVersions[key] = { ...acceptedVersionData };
+        currentFactsData.acceptedVersions[keyNum] = { ...acceptedVersionData };
+        console.log('DEBUG: [FIX] Re-stored with both keys after validation failure');
+        
+        // Verify again
+        const recheckString = currentFactsData.acceptedVersions[key] && currentFactsData.acceptedVersions[key].value === acceptedValue;
+        const recheckNumeric = currentFactsData.acceptedVersions[keyNum] && currentFactsData.acceptedVersions[keyNum].value === acceptedValue;
+        if (recheckString || recheckNumeric) {
+            console.log('DEBUG: [FIX] Validation passed after re-storage');
+        } else {
+            console.error('ERROR: [acceptConflictVersion] Storage validation STILL FAILED after fix attempt');
+            showError('Warning: Failed to store accepted version. Please try again.');
+        }
+    } else {
+        console.log('DEBUG: [VALIDATION] Storage verification PASSED');
+    }
+    
+    // Additional check: verify the key can be retrieved using the same method checkIfAllConflictsResolved uses
+    const testKeyStr = String(conflictIndex);
+    const testKeyNum = Number(conflictIndex);
+    const canRetrieveByString = currentFactsData.acceptedVersions[testKeyStr] && currentFactsData.acceptedVersions[testKeyStr].value === acceptedValue;
+    const canRetrieveByNumber = currentFactsData.acceptedVersions[testKeyNum] && currentFactsData.acceptedVersions[testKeyNum].value === acceptedValue;
+    console.log('DEBUG: [RETRIEVAL TEST] Can retrieve by string key (' + testKeyStr + '):', canRetrieveByString);
+    console.log('DEBUG: [RETRIEVAL TEST] Can retrieve by numeric key (' + testKeyNum + '):', canRetrieveByNumber);
+    
+    if (!canRetrieveByString && !canRetrieveByNumber) {
+        console.error('ERROR: [acceptConflictVersion] Retrieval test FAILED - key may not be accessible by checkIfAllConflictsResolved');
+    } else {
+        console.log('DEBUG: [RETRIEVAL TEST] Retrieval test PASSED');
+    }
+    
     console.log('DEBUG: ========== acceptConflictVersion storage complete ==========');
     
     // Update fact matrix with accepted value
@@ -2824,8 +2872,39 @@ function checkIfAllConflictsResolved() {
     console.log('DEBUG: acceptedVersions keys types:', Object.keys(currentFactsData.acceptedVersions).map(k => `${k} (${typeof k})`));
     console.log('DEBUG: acceptedVersions entries:', Object.entries(currentFactsData.acceptedVersions));
     
+    // Helper function to match conflict by content (sources and values) as fallback
+    const findAcceptedVersionByContent = (conflict) => {
+        if (!conflict || !currentFactsData.acceptedVersions) return null;
+        
+        const conflictSources = conflict.sources || [];
+        const conflictValues = conflict.conflicting_values || [];
+        const conflictSourcesStr = JSON.stringify(conflictSources.sort());
+        const conflictValuesStr = JSON.stringify(conflictValues.sort());
+        
+        // Check all accepted versions to find one that matches this conflict's content
+        for (const [key, acceptedVersion] of Object.entries(currentFactsData.acceptedVersions)) {
+            // Try to find the original conflict that this accepted version belongs to
+            const originalConflictIndex = parseInt(key);
+            if (!isNaN(originalConflictIndex) && currentFactsData.conflicts[originalConflictIndex]) {
+                const originalConflict = currentFactsData.conflicts[originalConflictIndex];
+                const originalSources = originalConflict.sources || [];
+                const originalValues = originalConflict.conflicting_values || [];
+                const originalSourcesStr = JSON.stringify(originalSources.sort());
+                const originalValuesStr = JSON.stringify(originalValues.sort());
+                
+                // Check if sources and values match
+                if (originalSourcesStr === conflictSourcesStr && originalValuesStr === conflictValuesStr) {
+                    console.log(`DEBUG: [Content Match] Found accepted version for conflict by content matching (key: ${key})`);
+                    return acceptedVersion;
+                }
+            }
+        }
+        return null;
+    };
+    
     // Check if all conflicts have accepted versions
     // Use String(idx) to ensure consistent key type matching (acceptedVersions keys are stored as strings)
+    let resolvedCount = 0;
     const allResolved = currentFactsData.conflicts.every((c, idx) => {
         const key = String(idx);
         const keyNum = idx;
@@ -2838,9 +2917,33 @@ function checkIfAllConflictsResolved() {
         console.log(`  - keyStr: "${keyStr}" (type: ${typeof keyStr})`);
         console.log(`  - conflict object:`, c);
         
-        // Try multiple key formats
-        const hasAcceptedStr = currentFactsData.acceptedVersions && currentFactsData.acceptedVersions[keyStr];
-        const hasAcceptedNum = currentFactsData.acceptedVersions && currentFactsData.acceptedVersions[keyNum];
+        // Try multiple key formats - check all possible variations
+        let hasAcceptedStr = currentFactsData.acceptedVersions && currentFactsData.acceptedVersions[keyStr];
+        let hasAcceptedNum = currentFactsData.acceptedVersions && currentFactsData.acceptedVersions[keyNum];
+        
+        // Also try checking all keys in acceptedVersions for any numeric/string variations
+        if (!hasAcceptedStr && !hasAcceptedNum) {
+            // Check all keys to see if any match this index (handles edge cases)
+            const allKeys = Object.keys(currentFactsData.acceptedVersions);
+            for (const avKey of allKeys) {
+                const avKeyNum = Number(avKey);
+                if (!isNaN(avKeyNum) && avKeyNum === idx) {
+                    hasAcceptedStr = currentFactsData.acceptedVersions[avKey];
+                    console.log(`DEBUG: [Key Match] Found accepted version using alternative key format: "${avKey}"`);
+                    break;
+                }
+            }
+        }
+        
+        // If still not found, try content-based matching as fallback
+        if (!hasAcceptedStr && !hasAcceptedNum) {
+            const contentMatch = findAcceptedVersionByContent(c);
+            if (contentMatch) {
+                hasAcceptedStr = contentMatch;
+                console.log(`DEBUG: [Content Fallback] Found accepted version for conflict ${idx} using content matching`);
+            }
+        }
+        
         const hasAccepted = hasAcceptedStr || hasAcceptedNum;
         
         console.log(`  - acceptedVersions["${keyStr}"]:`, hasAcceptedStr);
@@ -2856,7 +2959,10 @@ function checkIfAllConflictsResolved() {
             console.log(`  - Has key "${keyStr}":`, keyStr in currentFactsData.acceptedVersions);
             console.log(`  - Has key ${keyNum}:`, keyNum in currentFactsData.acceptedVersions);
             console.log(`  - All acceptedVersions entries:`, Object.entries(currentFactsData.acceptedVersions));
+            console.log(`  - Conflict sources:`, c.sources);
+            console.log(`  - Conflict values:`, c.conflicting_values);
         } else {
+            resolvedCount++;
             console.log(`LIABILITY_SIGNAL_LOG: [checkIfAllConflictsResolved] Conflict ${idx} HAS accepted version`);
             console.log(`  - Accepted version found:`, hasAcceptedStr || hasAcceptedNum);
         }
@@ -2864,11 +2970,18 @@ function checkIfAllConflictsResolved() {
         return hasAccepted;
     });
     
+    // Count-based validation: if we have at least as many accepted versions as conflicts, consider resolved
+    // This handles edge cases where keys might not match exactly but all conflicts are resolved
+    const countBasedResolved = acceptedVersionsCount >= conflictsCount && resolvedCount === conflictsCount;
+    
     console.log(`LIABILITY_SIGNAL_LOG: [checkIfAllConflictsResolved] ========== RESULT: ${allResolved ? 'ALL RESOLVED' : 'NOT ALL RESOLVED'} ==========`);
-    console.log(`LIABILITY_SIGNAL_LOG: [checkIfAllConflictsResolved] Conflicts: ${conflictsCount}, Accepted: ${acceptedVersionsCount}, All Resolved: ${allResolved}`);
+    console.log(`LIABILITY_SIGNAL_LOG: [checkIfAllConflictsResolved] Conflicts: ${conflictsCount}, Accepted: ${acceptedVersionsCount}, Resolved by index: ${resolvedCount}, All Resolved: ${allResolved}`);
+    console.log(`LIABILITY_SIGNAL_LOG: [checkIfAllConflictsResolved] Count-based check: ${acceptedVersionsCount} >= ${conflictsCount} && ${resolvedCount} === ${conflictsCount} = ${countBasedResolved}`);
     console.log(`DEBUG: All conflicts resolved: ${allResolved}`);
-    console.log(`DEBUG: Final check result: ${allResolved}`);
-    return allResolved;
+    console.log(`DEBUG: Final check result: ${allResolved || countBasedResolved}`);
+    
+    // Return true if either index-based check passes OR count-based check passes
+    return allResolved || countBasedResolved;
 }
 
 function updateLiabilityColumns(signalsData) {

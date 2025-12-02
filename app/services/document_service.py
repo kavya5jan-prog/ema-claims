@@ -164,20 +164,24 @@ def extract_facts_from_documents(files_data: List[Dict[str, Any]]) -> Dict[str, 
         print(f"DEBUG: extract_facts_from_documents: Calling OpenAI API with {len(content_parts)} content parts")
         
         try:
+            # Use longer timeout for fact extraction (180 seconds) due to potentially large payloads
             result = openai_service.call_with_json_response(
                 system_prompt=None,
                 user_content=content_parts,
-                max_tokens=4000
+                max_tokens=4000,
+                timeout=180.0
             )
-            logger.debug(f"OpenAI API call completed, result type: {type(result).__name__}, is None: {result is None}")
+            logger.debug(f"OpenAI API call completed, result type: {type(result).__name__}")
         except ValueError as ve:
-            error_msg = f"OpenAI API returned invalid response: {str(ve)}"
-            logger.error(error_msg, exc_info=True)
-            print(f"ERROR: {error_msg}")
+            # ValueError from OpenAI service indicates API errors (timeout, rate limit, etc.)
+            error_msg = str(ve)
+            logger.error(f"OpenAI API error: {error_msg}", exc_info=True)
+            print(f"ERROR: OpenAI API error: {error_msg}")
             import traceback
             print(f"ERROR: Traceback: {traceback.format_exc()}")
             raise Exception(error_msg)
         except TypeError as te:
+            # TypeError indicates unexpected response type
             error_msg = f"OpenAI API returned unexpected type: {str(te)}"
             logger.error(error_msg, exc_info=True)
             print(f"ERROR: {error_msg}")
@@ -185,6 +189,7 @@ def extract_facts_from_documents(files_data: List[Dict[str, Any]]) -> Dict[str, 
             print(f"ERROR: Traceback: {traceback.format_exc()}")
             raise Exception(error_msg)
         except Exception as api_error:
+            # Catch any other unexpected errors
             error_msg = f"OpenAI API call failed: {str(api_error)}"
             logger.error(error_msg, exc_info=True)
             print(f"ERROR: {error_msg}")
@@ -195,11 +200,12 @@ def extract_facts_from_documents(files_data: List[Dict[str, Any]]) -> Dict[str, 
         # Clean up content_parts to free memory
         del content_parts
         
-        logger.debug(f"OpenAI API returned result type: {type(result).__name__}, is None: {result is None}")
-        print(f"DEBUG: extract_facts_from_documents: OpenAI API returned result type: {type(result).__name__}, is None: {result is None}")
+        logger.debug(f"OpenAI API returned result type: {type(result).__name__}")
+        print(f"DEBUG: extract_facts_from_documents: OpenAI API returned result type: {type(result).__name__}")
         
-        if not result:
-            error_msg = "Failed to get response from OpenAI (result is None or empty)"
+        # Validate result structure
+        if not isinstance(result, dict):
+            error_msg = f"Expected dict response from OpenAI API, but got {type(result).__name__}"
             logger.error(error_msg)
             print(f"ERROR: {error_msg}")
             raise Exception(error_msg)
