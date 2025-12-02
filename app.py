@@ -3,6 +3,7 @@ import sys
 import base64
 import json
 import re
+import time
 from flask import Flask, render_template, request, jsonify
 import pdfplumber
 import PyPDF2
@@ -22,7 +23,13 @@ if os.environ.get('VERCEL'):
     app.config['UPLOAD_FOLDER'] = '/tmp'
 else:
     app.config['UPLOAD_FOLDER'] = 'uploads'
-    os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+    try:
+        os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+    except OSError as e:
+        print(f"Warning: Could not create uploads directory: {str(e)}")
+        # Fallback to /tmp if uploads directory creation fails
+        app.config['UPLOAD_FOLDER'] = '/tmp'
+        print(f"Using fallback upload folder: {app.config['UPLOAD_FOLDER']}")
 
 # Initialize OpenAI client
 openai_api_key = os.getenv('OPENAI_API_KEY')
@@ -45,6 +52,119 @@ MAX_IMAGES_PER_PAGE = int(os.getenv('MAX_IMAGES_PER_PAGE', '5'))  # Max images p
 MAX_IMAGES_PER_PDF = int(os.getenv('MAX_IMAGES_PER_PDF', '20'))  # Max total images per PDF
 MAX_TOTAL_IMAGES_PER_REQUEST = int(os.getenv('MAX_TOTAL_IMAGES_PER_REQUEST', '50'))  # Max images across all files
 JPEG_QUALITY = int(os.getenv('JPEG_QUALITY', '85'))  # JPEG compression quality (1-100)
+
+
+# OpenAI API helper function with retry logic and optimization
+def call_openai_api(
+    system_prompt=None,
+    user_content=None,
+    max_tokens=4000,
+    temperature=0.0,
+    response_format=None,
+    timeout=120,
+    max_retries=3
+):
+    """
+    Centralized OpenAI API call helper with retry logic, timeout, and optimized parameters.
+    
+    Args:
+        system_prompt: System message content (instructions)
+        user_content: User message content (can be str, list of dicts for multimodal)
+        max_tokens: Maximum tokens in response
+        temperature: Temperature (0.0-2.0), default 0.0 for deterministic outputs
+        response_format: Optional response format dict (e.g., {"type": "json_object"})
+        timeout: Request timeout in seconds (default 120)
+        max_retries: Maximum number of retry attempts (default 3)
+    
+    Returns:
+        Response object from OpenAI API
+    
+    Raises:
+        Exception: If API call fails after all retries
+    """
+    if not openai_client:
+        raise Exception("OpenAI client not initialized. Please set OPENAI_API_KEY in your environment.")
+    
+    # Build messages array with proper system/user separation
+    messages = []
+    if system_prompt:
+        messages.append({
+            "role": "system",
+            "content": system_prompt
+        })
+    
+    if user_content:
+        messages.append({
+            "role": "user",
+            "content": user_content
+        })
+    
+    if not messages:
+        raise ValueError("At least one of system_prompt or user_content must be provided")
+    
+    # Estimate tokens (rough: 1 token ≈ 4 characters for text)
+    estimated_input_tokens = 0
+    if system_prompt:
+        estimated_input_tokens += len(system_prompt) // 4
+    if isinstance(user_content, str):
+        estimated_input_tokens += len(user_content) // 4
+    elif isinstance(user_content, list):
+        # For multimodal content, estimate based on text parts
+        for item in user_content:
+            if isinstance(item, dict) and item.get("type") == "text":
+                estimated_input_tokens += len(item.get("text", "")) // 4
+            # Images are harder to estimate, skip for now
+    
+    # Log warning if estimated tokens are very high
+    if estimated_input_tokens > 100000:  # gpt-4o context window is ~128k tokens
+        print(f"Warning: High estimated input tokens ({estimated_input_tokens}), may exceed model limits")
+    
+    # Prepare API call parameters
+    api_params = {
+        "model": "gpt-4o",
+        "messages": messages,
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+        "timeout": timeout
+    }
+    
+    if response_format:
+        api_params["response_format"] = response_format
+    
+    # Retry logic with exponential backoff
+    last_exception = None
+    for attempt in range(max_retries):
+        try:
+            response = openai_client.chat.completions.create(**api_params)
+            return response
+        
+        except Exception as e:
+            last_exception = e
+            error_str = str(e).lower()
+            
+            # Don't retry on certain errors
+            if "invalid" in error_str or "malformed" in error_str or "authentication" in error_str:
+                raise Exception(f"OpenAI API error (non-retryable): {str(e)}")
+            
+            # Check if it's a rate limit error
+            is_rate_limit = "rate limit" in error_str or "429" in error_str or "quota" in error_str
+            
+            if attempt < max_retries - 1:
+                # Exponential backoff: 1s, 2s, 4s
+                wait_time = 2 ** attempt
+                if is_rate_limit:
+                    # Longer wait for rate limits
+                    wait_time = min(wait_time * 5, 60)  # Cap at 60 seconds
+                
+                print(f"OpenAI API call failed (attempt {attempt + 1}/{max_retries}): {str(e)}. Retrying in {wait_time}s...")
+                time.sleep(wait_time)
+            else:
+                # Last attempt failed
+                error_type = "rate limit" if is_rate_limit else "API"
+                raise Exception(f"OpenAI {error_type} error after {max_retries} attempts: {str(e)}")
+    
+    # Should never reach here, but just in case
+    raise Exception(f"OpenAI API call failed: {str(last_exception)}")
 
 
 def optimize_image(pil_image):
@@ -353,6 +473,35 @@ def extract_image_content(image_path):
         raise Exception(f'Error processing image: {str(e)}')
 
 
+def transcribe_audio(audio_file_path):
+    """
+    Transcribe audio file using OpenAI Whisper API.
+    
+    Args:
+        audio_file_path: Path to the audio file
+        
+    Returns:
+        Transcription text
+    """
+    if not openai_client:
+        raise Exception('OpenAI API key not configured')
+    
+    try:
+        # Open audio file and transcribe
+        with open(audio_file_path, 'rb') as audio_file:
+            transcription = openai_client.audio.transcriptions.create(
+                model="whisper-1",
+                file=audio_file
+            )
+        
+        return transcription.text
+    
+    except Exception as e:
+        error_msg = str(e)
+        print(f"Error in transcribe_audio: {error_msg}")
+        raise Exception(f"Audio transcription failed: {error_msg}")
+
+
 @app.route('/upload', methods=['POST'])
 def upload_file():
     """Handle file upload and extraction (PDFs and images)."""
@@ -368,10 +517,11 @@ def upload_file():
         # Get file extension
         filename_lower = file.filename.lower()
         is_pdf = filename_lower.endswith('.pdf')
-        is_image = any(filename_lower.endswith(ext) for ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'])
+        is_image = any(filename_lower.endswith(ext) for ext in ['.jpg', '.jpeg', '.png'])
+        is_audio = any(filename_lower.endswith(ext) for ext in ['.mp3', '.wav', '.m4a', '.mp4', '.mpeg', '.mpga', '.webm', '.ogg'])
         
-        if not (is_pdf or is_image):
-            return jsonify({'error': 'Invalid file type. Please upload a PDF or image file.'}), 400
+        if not (is_pdf or is_image or is_audio):
+            return jsonify({'error': 'Invalid file type. Only PDF, PNG, JPEG, JPG, and audio files (MP3, WAV, M4A, etc.) are supported.'}), 400
         
         # Save uploaded file
         file_path = os.path.join(app.config['UPLOAD_FOLDER'], file.filename)
@@ -383,9 +533,34 @@ def upload_file():
                 extracted_content = extract_pdf_content(file_path)
                 extracted_content['type'] = 'pdf'
                 extracted_content['filename'] = file.filename
+                
+                # Extract text content for type detection (first page)
+                pages = extracted_content.get('pages', [])
+                content_text = ''
+                if pages:
+                    content_text = pages[0].get('text', '').strip()
+            elif is_audio:
+                # Transcribe audio file
+                transcription = transcribe_audio(file_path)
+                extracted_content = {
+                    'type': 'audio',
+                    'filename': file.filename,
+                    'transcription': transcription,
+                    'pages': [{
+                        'page_number': 1,
+                        'text': transcription
+                    }]
+                }
+                content_text = transcription
             else:
                 # Extract image content
                 extracted_content = extract_image_content(file_path)
+                content_text = ''  # Images don't have text content easily extractable
+            
+            # Detect document source type (for consistency, even though single upload is pre-matched)
+            detected_source, is_relevant = identify_document_source(file.filename, content_text if content_text else None)
+            extracted_content['detected_source'] = detected_source
+            extracted_content['is_relevant'] = is_relevant
             
             # Clean up uploaded file
             os.remove(file_path)
@@ -402,8 +577,114 @@ def upload_file():
         return jsonify({'error': f'Upload failed: {str(e)}'}), 500
 
 
-def identify_document_source(filename):
-    """Map filename to source type."""
+@app.route('/upload-multiple', methods=['POST'])
+def upload_multiple_files():
+    """Handle multiple file uploads with automatic type detection."""
+    try:
+        if 'files' not in request.files:
+            return jsonify({'error': 'No files provided'}), 400
+        
+        files = request.files.getlist('files')
+        
+        if not files or len(files) == 0:
+            return jsonify({'error': 'No files selected'}), 400
+        
+        results = []
+        
+        for file in files:
+            if file.filename == '':
+                results.append({
+                    'filename': 'unknown',
+                    'error': 'Empty filename'
+                })
+                continue
+            
+            try:
+                # Get file extension
+                filename_lower = file.filename.lower()
+                is_pdf = filename_lower.endswith('.pdf')
+                is_image = any(filename_lower.endswith(ext) for ext in ['.jpg', '.jpeg', '.png'])
+                is_audio = any(filename_lower.endswith(ext) for ext in ['.mp3', '.wav', '.m4a', '.mp4', '.mpeg', '.mpga', '.webm', '.ogg'])
+                
+                if not (is_pdf or is_image or is_audio):
+                    results.append({
+                        'filename': file.filename,
+                        'error': 'Invalid file type. Only PDF, PNG, JPEG, JPG, and audio files (MP3, WAV, M4A, etc.) are supported.'
+                    })
+                    continue
+                
+                # Save uploaded file
+                file_path = os.path.join(app.config['UPLOAD_FOLDER'], file.filename)
+                file.save(file_path)
+                
+                try:
+                    # Extract content
+                    content_text = ''
+                    if is_pdf:
+                        # Extract PDF content
+                        extracted_content = extract_pdf_content(file_path)
+                        extracted_content['type'] = 'pdf'
+                        extracted_content['filename'] = file.filename
+                        
+                        # Extract text content for type detection (first 2-3 pages)
+                        pages = extracted_content.get('pages', [])
+                        for page in pages[:3]:  # First 3 pages
+                            page_text = page.get('text', '').strip()
+                            if page_text:
+                                content_text += page_text + '\n'
+                    elif is_audio:
+                        # Transcribe audio file
+                        transcription = transcribe_audio(file_path)
+                        extracted_content = {
+                            'type': 'audio',
+                            'filename': file.filename,
+                            'transcription': transcription,
+                            'pages': [{
+                                'page_number': 1,
+                                'text': transcription
+                            }]
+                        }
+                        content_text = transcription
+                    else:
+                        # Extract image content
+                        extracted_content = extract_image_content(file_path)
+                        # For images, we'll use filename-based detection primarily
+                        # Content-based detection for images would require OCR/vision API
+                        content_text = ''  # Images don't have text content easily extractable
+                    
+                    # Detect document source type
+                    detected_source, is_relevant = identify_document_source(file.filename, content_text if content_text else None)
+                    
+                    # Add detected source to response
+                    extracted_content['detected_source'] = detected_source
+                    extracted_content['is_relevant'] = is_relevant
+                    
+                    results.append(extracted_content)
+                    
+                except Exception as e:
+                    results.append({
+                        'filename': file.filename,
+                        'error': f'Error processing file: {str(e)}'
+                    })
+                finally:
+                    # Clean up uploaded file
+                    if os.path.exists(file_path):
+                        os.remove(file_path)
+            
+            except Exception as e:
+                results.append({
+                    'filename': file.filename if file else 'unknown',
+                    'error': f'Upload failed: {str(e)}'
+                })
+        
+        return jsonify({'results': results}), 200
+    
+    except Exception as e:
+        return jsonify({'error': f'Bulk upload failed: {str(e)}'}), 500
+
+
+def identify_document_source_from_filename(filename):
+    """Map filename to source type based on filename keywords."""
     filename_lower = filename.lower()
     if 'fnol' in filename_lower:
         return 'fnol'
@@ -419,6 +700,101 @@ def identify_document_source(filename):
         return 'policy'
     else:
         return 'unknown'
+
+
+def identify_document_source_from_content(content_text, filename=''):
+    """Use OpenAI to classify document type from content. Returns tuple (doc_type, is_relevant)."""
+    if not openai_client:
+        return ('unknown', False)
+    
+    if not content_text or len(content_text.strip()) < 50:
+        # Not enough content to analyze
+        return ('unknown', False)
+    
+    # Limit content to first 2000 characters for efficiency
+    content_sample = content_text[:2000] if len(content_text) > 2000 else content_text
+    
+    system_prompt = """You are an expert at classifying auto insurance claim documents. Analyze the document content and classify it as one of the following types:
+
+- fnol: First Notice of Loss - initial claim report
+- claimant: Claimant statement or witness statement from the person making the claim
+- other_driver: Statement from the other driver involved in the accident
+- police: Police report or law enforcement documentation
+- repair_estimate: Repair estimate, damage assessment, or vehicle inspection report
+- policy: Insurance policy document or coverage information
+- unknown: Cannot determine the document type
+
+Also determine if the document is relevant to an auto insurance claim, even if it doesn't match a specific category.
+
+Return your response as a JSON object with this exact structure:
+{
+  "document_type": "fnol|claimant|other_driver|police|repair_estimate|policy|unknown",
+  "confidence": 0.0-1.0,
+  "is_relevant": true|false,
+  "reasoning": "brief explanation of why this classification was chosen"
+}"""
+    
+    user_content = f"Filename: {filename}\n\nContent:\n{content_sample}"
+    
+    try:
+        response = call_openai_api(
+            system_prompt=system_prompt,
+            user_content=user_content,
+            max_tokens=500,
+            temperature=0.0,
+            response_format={"type": "json_object"},
+            timeout=60
+        )
+        
+        response_text = response.choices[0].message.content
+        
+        # Parse JSON response
+        try:
+            result = json.loads(response_text)
+            doc_type = result.get('document_type', 'unknown')
+            confidence = result.get('confidence', 0.0)
+            is_relevant = result.get('is_relevant', False)
+            
+            # Only return classification if confidence is reasonable
+            if confidence >= 0.6 and doc_type != 'unknown':
+                return (doc_type, is_relevant)
+            else:
+                # Even if type is unknown, check if content is relevant
+                return ('unknown', is_relevant)
+        
+        except json.JSONDecodeError:
+            # Try to extract JSON from response
+            json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
+            if json_match:
+                result = json.loads(json_match.group())
+                doc_type = result.get('document_type', 'unknown')
+                confidence = result.get('confidence', 0.0)
+                is_relevant = result.get('is_relevant', False)
+                if confidence >= 0.6 and doc_type != 'unknown':
+                    return (doc_type, is_relevant)
+                else:
+                    return ('unknown', is_relevant)
+            return ('unknown', False)
+    
+    except Exception as e:
+        print(f"Warning: OpenAI document classification failed: {str(e)}")
+        return ('unknown', False)
+
+
+def identify_document_source(filename, content=None):
+    """Map filename to source type, with optional content-based fallback. Returns tuple (source, is_relevant)."""
+    # First try filename-based detection
+    source = identify_document_source_from_filename(filename)
+    is_relevant = False
+    
+    # If unknown and content provided, try content-based detection
+    if source == 'unknown' and content:
+        source, is_relevant = identify_document_source_from_content(content, filename)
+    elif source != 'unknown':
+        # If we matched by filename, assume it's relevant
+        is_relevant = True
+    
+    return (source, is_relevant)
 
 
 def normalize_facts(facts_list):
@@ -557,21 +933,15 @@ Analyze the following fact matrix:"""
         if fact.get('is_implied'):
             facts_text += f"  Is Implied: {fact.get('is_implied')}\n"
     
-    # Prepare content for OpenAI
-    full_prompt = system_prompt + facts_text
-    
     # Call OpenAI API with JSON mode
     try:
-        response = openai_client.chat.completions.create(
-            model="gpt-4o",
-            messages=[
-                {
-                    "role": "user",
-                    "content": full_prompt
-                }
-            ],
+        response = call_openai_api(
+            system_prompt=system_prompt,
+            user_content=facts_text,
+            max_tokens=4000,
+            temperature=0.0,
             response_format={"type": "json_object"},
-            max_tokens=4000
+            timeout=120
         )
         
         response_text = response.choices[0].message.content
@@ -769,6 +1139,19 @@ Documents to analyze:
                 page_text = page.get('text', '').strip()
                 if page_text:
                     text_content += f"\nPage {page.get('page_number', '?')}:\n{page_text}\n"
+        
+        elif file_type == 'audio':
+            # Handle audio transcription
+            pages = file_data.get('pages', [])
+            transcription = file_data.get('transcription', '')
+            if transcription:
+                text_content += f"\nAudio Transcription:\n{transcription}\n"
+            elif pages:
+                # Fallback to pages if transcription not directly available
+                for page in pages:
+                    page_text = page.get('text', '').strip()
+                    if page_text:
+                        text_content += f"\nAudio Transcription:\n{page_text}\n"
             
             # Add images from PDF (with limits)
             for page in pages:
@@ -849,37 +1232,48 @@ Documents to analyze:
                         images_added_count += 1
                         text_content += f"\nThis is an image file: {filename}\n"
         
-    # Add text content
-    content_parts.insert(0, {
-        "type": "text",
-        "text": text_content
-    })
+    # Split text_content into system prompt and user content
+    system_prompt_end = text_content.find("Documents to analyze:")
+    if system_prompt_end != -1:
+        system_prompt = text_content[:system_prompt_end + len("Documents to analyze:")]
+        user_text_content = text_content[system_prompt_end + len("Documents to analyze:"):].strip()
+    else:
+        # Fallback: use first part as system prompt
+        system_prompt = text_content.split("\n\n")[0] if "\n\n" in text_content else text_content[:500]
+        user_text_content = text_content[len(system_prompt):].strip()
+    
+    # Build user content with text and images
+    user_content_parts = []
+    if user_text_content:
+        user_content_parts.append({
+            "type": "text",
+            "text": user_text_content
+        })
+    user_content_parts.extend(content_parts)
     
     # Call OpenAI API with JSON mode
     try:
         # Estimate content size before API call
         try:
-            content_size = sys.getsizeof(str(content_parts))
+            content_size = sys.getsizeof(str(user_content_parts))
             if content_size > 20 * 1024 * 1024:  # 20MB warning
                 print(f"Warning: Large content payload ({content_size / (1024*1024):.1f}MB) being sent to OpenAI API")
         except Exception:
             pass  # Ignore size estimation errors
         
-        response = openai_client.chat.completions.create(
-            model="gpt-4o",
-            messages=[
-                {
-                    "role": "user",
-                    "content": content_parts
-                }
-            ],
+        response = call_openai_api(
+            system_prompt=system_prompt,
+            user_content=user_content_parts,
+            max_tokens=4000,
+            temperature=0.0,
             response_format={"type": "json_object"},
-            max_tokens=4000
+            timeout=180  # Longer timeout for multimodal content
         )
         
         response_text = response.choices[0].message.content
         
-        # Clean up content_parts to free memory
+        # Clean up to free memory
+        del user_content_parts
         del content_parts
         
         # Parse JSON response
@@ -902,6 +1296,16 @@ Documents to analyze:
                     pages = file_data.get('pages', [])
                     text_sample = ' '.join([p.get('text', '')[:200] for p in pages[:2]]).lower()
                     doc_text_samples[source] = text_sample
+                elif file_data.get('type') == 'audio':
+                    # For audio, use transcription text
+                    transcription = file_data.get('transcription', '')
+                    if transcription:
+                        doc_text_samples[source] = transcription[:400].lower()
+                    else:
+                        pages = file_data.get('pages', [])
+                        if pages:
+                            text_sample = ' '.join([p.get('text', '')[:200] for p in pages[:2]]).lower()
+                            doc_text_samples[source] = text_sample
             
             # Ensure all facts have source properly set
             for fact in facts:
@@ -1148,23 +1552,26 @@ def generate_summary():
                     if file_data.get('width') and file_data.get('height'):
                         text_content += f"Image dimensions: {file_data.get('width')}x{file_data.get('height')} pixels\n"
         
-        # Add text content
-        content_parts.insert(0, {
+        # Separate system prompt from user content
+        system_prompt = "You are an expert auto insurance claims analyst. Analyze the provided claim documents and generate a comprehensive summary."
+        
+        user_text = text_content + "\n\nPlease provide a comprehensive summary of all the claim documents, including:\n1. Key information from each document\n2. Important dates, names, and locations\n3. Damage descriptions\n4. Any inconsistencies or missing information\n5. Overall assessment of the claim"
+        
+        # Build user content with text and images
+        user_content_parts = [{
             "type": "text",
-            "text": text_content + "\n\nPlease provide a comprehensive summary of all the claim documents, including:\n1. Key information from each document\n2. Important dates, names, and locations\n3. Damage descriptions\n4. Any inconsistencies or missing information\n5. Overall assessment of the claim"
-        })
+            "text": user_text
+        }]
+        user_content_parts.extend(content_parts)
         
         # Call OpenAI API
         try:
-            response = openai_client.chat.completions.create(
-                model="gpt-4o",
-                messages=[
-                    {
-                        "role": "user",
-                        "content": content_parts
-                    }
-                ],
-                max_tokens=2000
+            response = call_openai_api(
+                system_prompt=system_prompt,
+                user_content=user_content_parts,
+                max_tokens=2000,
+                temperature=0.2,  # Slightly higher for summary (more creative)
+                timeout=180  # Longer timeout for multimodal content
             )
             
             summary = response.choices[0].message.content
@@ -1248,21 +1655,15 @@ Analyze the following fact matrix:"""
             if fact.get('normalized_value'):
                 facts_text += f"  Normalized Value: {fact.get('normalized_value')}\n"
         
-        # Prepare content for OpenAI
-        full_prompt = system_prompt + facts_text
-        
         # Call OpenAI API with JSON mode
         try:
-            response = openai_client.chat.completions.create(
-                model="gpt-4o",
-                messages=[
-                    {
-                        "role": "user",
-                        "content": full_prompt
-                    }
-                ],
+            response = call_openai_api(
+                system_prompt=system_prompt,
+                user_content=facts_text,
+                max_tokens=4000,
+                temperature=0.0,
                 response_format={"type": "json_object"},
-                max_tokens=4000
+                timeout=120
             )
             
             response_text = response.choices[0].message.content
@@ -1304,15 +1705,15 @@ def check_evidence_completeness():
         if not openai_client:
             return jsonify({'error': 'OpenAI API key not configured. Please set OPENAI_API_KEY in your environment.'}), 500
         
-        # Get fact matrix data from request
+        # Get files data from request
         request_data = request.json
-        facts = request_data.get('facts', [])
+        files = request_data.get('files', [])
         
-        if not facts:
-            return jsonify({'error': 'No facts provided. Please extract facts first.'}), 400
+        if not files:
+            return jsonify({'error': 'No files provided. Please upload files first.'}), 400
         
         # Build system prompt for evidence completeness check
-        system_prompt = """You are an expert auto insurance claims analyst specializing in evidence package completeness. Your task is to analyze the fact matrix extracted from claim documents and check for completeness of the standard evidence package.
+        system_prompt = """You are an expert auto insurance claims analyst specializing in evidence package completeness. Your task is to analyze the uploaded files and check for completeness of the standard evidence package.
 
 Check for the following:
 
@@ -1398,35 +1799,37 @@ Return your response as a JSON object with this exact structure:
   ]
 }
 
-Analyze the following fact matrix:"""
+Analyze the following uploaded files:"""
         
-        # Format facts for the prompt
-        facts_text = "\n\nFact Matrix:\n"
-        for idx, fact in enumerate(facts):
-            facts_text += f"\nFact {idx + 1}:\n"
-            facts_text += f"  Source Text: {fact.get('source_text', 'N/A')}\n"
-            facts_text += f"  Extracted Fact: {fact.get('extracted_fact', 'N/A')}\n"
-            facts_text += f"  Category: {fact.get('category', 'N/A')}\n"
-            facts_text += f"  Source: {fact.get('source', 'N/A')}\n"
-            facts_text += f"  Confidence: {fact.get('confidence', 0)}\n"
-            if fact.get('normalized_value'):
-                facts_text += f"  Normalized Value: {fact.get('normalized_value')}\n"
-        
-        # Prepare content for OpenAI
-        full_prompt = system_prompt + facts_text
+        # Format files for the prompt
+        files_text = "\n\nUploaded Files:\n"
+        for idx, file_data in enumerate(files):
+            filename = file_data.get('filename', file_data.get('originalFilename', f'File {idx + 1}'))
+            detected_source = file_data.get('detected_source', 'unknown')
+            file_type = file_data.get('type', 'unknown')
+            
+            files_text += f"\nFile {idx + 1}: {filename}\n"
+            files_text += f"  Type: {file_type}\n"
+            files_text += f"  Detected Source: {detected_source}\n"
+            
+            # Include text content if available (for PDFs)
+            if file_type == 'pdf' and 'pages' in file_data:
+                pages = file_data.get('pages', [])
+                if pages:
+                    # Include first page text as sample
+                    first_page_text = pages[0].get('text', '')[:500]  # First 500 chars
+                    if first_page_text:
+                        files_text += f"  Content Sample: {first_page_text}...\n"
         
         # Call OpenAI API with JSON mode
         try:
-            response = openai_client.chat.completions.create(
-                model="gpt-4o",
-                messages=[
-                    {
-                        "role": "user",
-                        "content": full_prompt
-                    }
-                ],
+            response = call_openai_api(
+                system_prompt=system_prompt,
+                user_content=files_text,
+                max_tokens=4000,
+                temperature=0.0,
                 response_format={"type": "json_object"},
-                max_tokens=4000
+                timeout=120
             )
             
             response_text = response.choices[0].message.content
@@ -1532,21 +1935,15 @@ Analyze the following fact matrix:"""
             if fact.get('normalized_value'):
                 facts_text += f"  Normalized Value: {fact.get('normalized_value')}\n"
         
-        # Prepare content for OpenAI
-        full_prompt = system_prompt + facts_text
-        
         # Call OpenAI API with JSON mode
         try:
-            response = openai_client.chat.completions.create(
-                model="gpt-4o",
-                messages=[
-                    {
-                        "role": "user",
-                        "content": full_prompt
-                    }
-                ],
+            response = call_openai_api(
+                system_prompt=system_prompt,
+                user_content=facts_text,
+                max_tokens=4000,
+                temperature=0.0,
                 response_format={"type": "json_object"},
-                max_tokens=4000
+                timeout=120
             )
             
             response_text = response.choices[0].message.content
@@ -1672,21 +2069,15 @@ Analyze the following fact matrix and liability signals:"""
             if signal.get('discrepancies'):
                 signals_text += f"  Discrepancies: {signal.get('discrepancies')}\n"
         
-        # Prepare content for OpenAI
-        full_prompt = system_prompt + facts_text + signals_text
-        
         # Call OpenAI API with JSON mode
         try:
-            response = openai_client.chat.completions.create(
-                model="gpt-4o",
-                messages=[
-                    {
-                        "role": "user",
-                        "content": full_prompt
-                    }
-                ],
+            response = call_openai_api(
+                system_prompt=system_prompt,
+                user_content=facts_text + signals_text,
+                max_tokens=4000,
+                temperature=0.0,
                 response_format={"type": "json_object"},
-                max_tokens=4000
+                timeout=120
             )
             
             response_text = response.choices[0].message.content
@@ -1835,21 +2226,15 @@ Analyze the following fact matrix and liability signals:"""
         else:
             signals_text += "\nNo liability signals provided.\n"
         
-        # Prepare content for OpenAI
-        full_prompt = system_prompt + facts_text + signals_text
-        
         # Call OpenAI API with JSON mode
         try:
-            response = openai_client.chat.completions.create(
-                model="gpt-4o",
-                messages=[
-                    {
-                        "role": "user",
-                        "content": full_prompt
-                    }
-                ],
+            response = call_openai_api(
+                system_prompt=system_prompt,
+                user_content=facts_text + signals_text,
+                max_tokens=4000,
+                temperature=0.0,
                 response_format={"type": "json_object"},
-                max_tokens=4000
+                timeout=120
             )
             
             response_text = response.choices[0].message.content
@@ -2016,21 +2401,15 @@ Analyze the following fact matrix and liability signals:"""
         else:
             signals_text += "\nNo liability signals provided.\n"
         
-        # Prepare content for OpenAI
-        full_prompt = system_prompt + facts_text + signals_text
-        
         # Call OpenAI API with JSON mode
         try:
-            response = openai_client.chat.completions.create(
-                model="gpt-4o",
-                messages=[
-                    {
-                        "role": "user",
-                        "content": full_prompt
-                    }
-                ],
+            response = call_openai_api(
+                system_prompt=system_prompt,
+                user_content=facts_text + signals_text,
+                max_tokens=4000,
+                temperature=0.0,
                 response_format={"type": "json_object"},
-                max_tokens=4000
+                timeout=120
             )
             
             response_text = response.choices[0].message.content
@@ -2061,6 +2440,251 @@ Analyze the following fact matrix and liability signals:"""
     
     except Exception as e:
         return jsonify({'error': f'Escalation package generation failed: {str(e)}'}), 500
+
+
+@app.route('/download-claim-rationale-pdf', methods=['POST'])
+def download_claim_rationale_pdf():
+    """Generate and return a PDF of the claim rationale."""
+    try:
+        from reportlab.lib.pagesizes import letter
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib.units import inch
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak
+        from reportlab.lib.enums import TA_LEFT, TA_JUSTIFY
+        from io import BytesIO
+        import html2text
+        
+        # Parse and validate request data
+        request_data = request.json
+        if not request_data:
+            print("download_claim_rationale_pfd: No request data provided.")
+            return jsonify({'error': 'No request data provided.'}), 400
+            
+        rationale = request_data.get('rationale', {})
+        
+        if not rationale:
+            print("download_claim_rationale_pfd: No rationale data provided.")
+            return jsonify({'error': 'No rationale data provided.'}), 400
+        
+        # Ensure rationale is a dictionary
+        if not isinstance(rationale, dict):
+            print("download_claim_rationale_pfd: Rationale is not a dictionary.")
+            return jsonify({'error': 'Invalid rationale format. Expected a dictionary.'}), 400
+        
+        # Create PDF in memory
+        buffer = BytesIO()
+        doc = SimpleDocTemplate(buffer, pagesize=letter,
+                                rightMargin=72, leftMargin=72,
+                                topMargin=72, bottomMargin=18)
+        
+        # Container for the 'Flowable' objects
+        elements = []
+        
+        # Define styles
+        styles = getSampleStyleSheet()
+        title_style = ParagraphStyle(
+            'CustomTitle',
+            parent=styles['Heading1'],
+            fontSize=16,
+            textColor='#333333',
+            spaceAfter=12,
+            alignment=TA_LEFT
+        )
+        heading_style = ParagraphStyle(
+            'CustomHeading',
+            parent=styles['Heading2'],
+            fontSize=14,
+            textColor='#333333',
+            spaceAfter=10,
+            spaceBefore=12,
+            alignment=TA_LEFT
+        )
+        normal_style = ParagraphStyle(
+            'CustomNormal',
+            parent=styles['Normal'],
+            fontSize=11,
+            textColor='#333333',
+            spaceAfter=8,
+            alignment=TA_JUSTIFY,
+            leading=14
+        )
+        
+        # Convert HTML to plain text
+        h = html2text.HTML2Text()
+        h.ignore_links = True
+        h.body_width = 0
+        
+        # Helper function to safely convert text to PDF paragraph
+        def safe_paragraph(text, style):
+            """Safely convert text to Paragraph, handling empty strings and None."""
+            if not text:
+                return None
+            try:
+                # Convert to string and strip
+                text_str = str(text).strip()
+                if not text_str:
+                    return None
+                # Convert HTML to plain text if needed
+                if '<' in text_str or '>' in text_str:
+                    text_str = h.handle(text_str).strip()
+                # Escape XML special characters for ReportLab
+                text_str = text_str.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+                return Paragraph(text_str, style)
+            except Exception as e:
+                print(f"Error creating paragraph: {e}")
+                return None
+        
+        # Title
+        elements.append(Paragraph("Claim File Rationale", title_style))
+        elements.append(Spacer(1, 0.2*inch))
+        
+        # Incident Summary
+        if rationale.get('incident_summary'):
+            para = safe_paragraph(rationale['incident_summary'], normal_style)
+            if para:
+                elements.append(Paragraph("Incident Summary", heading_style))
+                elements.append(para)
+                elements.append(Spacer(1, 0.15*inch))
+        
+        # Evidence Overview
+        if rationale.get('evidence_overview'):
+            evidence = rationale['evidence_overview']
+            has_evidence = False
+            if isinstance(evidence, dict):
+                if evidence.get('narratives'):
+                    para = safe_paragraph(evidence['narratives'], normal_style)
+                    if para:
+                        if not has_evidence:
+                            elements.append(Paragraph("Evidence Overview", heading_style))
+                            has_evidence = True
+                        elements.append(Paragraph("<b>Narratives:</b>", normal_style))
+                        elements.append(para)
+                if evidence.get('photos'):
+                    para = safe_paragraph(evidence['photos'], normal_style)
+                    if para:
+                        if not has_evidence:
+                            elements.append(Paragraph("Evidence Overview", heading_style))
+                            has_evidence = True
+                        elements.append(Paragraph("<b>Photos:</b>", normal_style))
+                        elements.append(para)
+            if has_evidence:
+                elements.append(Spacer(1, 0.15*inch))
+        
+        # Liability Assessment Logic
+        if rationale.get('liability_assessment_logic'):
+            para = safe_paragraph(rationale['liability_assessment_logic'], normal_style)
+            if para:
+                elements.append(Paragraph("Liability Assessment Logic", heading_style))
+                elements.append(para)
+                elements.append(Spacer(1, 0.15*inch))
+        
+        # Key Evidence
+        if rationale.get('key_evidence') and isinstance(rationale['key_evidence'], list) and len(rationale['key_evidence']) > 0:
+            elements.append(Paragraph("Key Evidence Supporting Assessment", heading_style))
+            for item in rationale['key_evidence']:
+                if item:
+                    item_str = str(item).strip()
+                    if item_str:
+                        # Convert HTML to plain text if needed
+                        if '<' in item_str or '>' in item_str:
+                            item_str = h.handle(item_str).strip()
+                        # Escape XML special characters
+                        item_str = item_str.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+                        elements.append(Paragraph(f"• {item_str}", normal_style))
+            elements.append(Spacer(1, 0.15*inch))
+        
+        # Open Questions
+        if rationale.get('open_questions') and isinstance(rationale['open_questions'], list) and len(rationale['open_questions']) > 0:
+            elements.append(Paragraph("Open Questions / Follow-Up", heading_style))
+            for item in rationale['open_questions']:
+                if item:
+                    item_str = str(item).strip()
+                    if item_str:
+                        # Convert HTML to plain text if needed
+                        if '<' in item_str or '>' in item_str:
+                            item_str = h.handle(item_str).strip()
+                        # Escape XML special characters
+                        item_str = item_str.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+                        elements.append(Paragraph(f"• {item_str}", normal_style))
+            elements.append(Spacer(1, 0.15*inch))
+        
+        # Coverage Considerations
+        if rationale.get('coverage_considerations'):
+            para = safe_paragraph(rationale['coverage_considerations'], normal_style)
+            if para:
+                elements.append(Paragraph("Coverage Considerations", heading_style))
+                elements.append(para)
+                elements.append(Spacer(1, 0.15*inch))
+        
+        # Recommendation
+        if rationale.get('recommendation'):
+            para = safe_paragraph(rationale['recommendation'], normal_style)
+            if para:
+                elements.append(Paragraph("Recommendation", heading_style))
+                elements.append(para)
+        
+        # Check if we have any content
+        if len(elements) <= 2:  # Only title and spacer
+            return jsonify({'error': 'No content available to generate PDF.'}), 400
+        
+        # Build PDF
+        try:
+            doc.build(elements)
+        except Exception as build_error:
+            print(f"download_claim_rationale_pdf: Error building PDF: {build_error}")
+            return jsonify({'error': f'Error building PDF: {str(build_error)}'}), 500
+        
+        # Get PDF data
+        pdf_data = buffer.getvalue()
+        buffer.close()
+        
+        if not pdf_data or len(pdf_data) == 0:
+            return jsonify({'error': 'Generated PDF is empty.'}), 500
+        
+        # Return PDF as response
+        from flask import Response
+        return Response(
+            pdf_data,
+            mimetype='application/pdf',
+            headers={
+                'Content-Disposition': 'attachment; filename=claim_rationale.pdf'
+            }
+        )
+    
+    except ImportError as imp_err:
+        # Fallback: return JSON if reportlab / html2text are not available
+        print(f"download_claim_rationale_pdf: ImportError while generating PDF: {imp_err}")
+        return jsonify({
+            'error': 'PDF generation is currently unavailable. Please contact support.'
+        }), 500
+    except Exception as e:
+        print(f"download_claim_rationale_pdf: Unexpected error: {e}")
+        return jsonify({'error': f'PDF generation failed: {str(e)}'}), 500
+
+
+@app.route('/save-claim-rationale', methods=['POST'])
+def save_claim_rationale():
+    """Save edited claim rationale."""
+    try:
+        request_data = request.json
+        rationale = request_data.get('rationale', {})
+        
+        if not rationale:
+            return jsonify({'error': 'No rationale data provided.'}), 400
+        
+        # Validate required fields
+        if not isinstance(rationale, dict):
+            return jsonify({'error': 'Invalid rationale format.'}), 400
+        
+        # The rationale is saved on the client side, but we validate and acknowledge here
+        # In a real application, you might want to save this to a database
+        return jsonify({
+            'success': True,
+            'message': 'Rationale saved successfully.'
+        }), 200
+    
+    except Exception as e:
+        return jsonify({'error': f'Failed to save rationale: {str(e)}'}), 500
 
 
 if __name__ == '__main__':

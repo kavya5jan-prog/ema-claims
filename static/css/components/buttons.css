@@ -1,0 +1,212 @@
+/* Button components */
+.upload-button {
+    display: inline-block;
+    padding: 8px 20px;
+    background: #333;
+    color: white;
+    border-radius: 4px;
+    font-weight: 500;
+    cursor: pointer;
+    border: none;
+}
+
+.upload-button:hover {
+    background: #555;
+}
+
+.summary-button {
+    padding: 8px 16px;
+    background: #333;
+    color: white;
+    border: none;
+    border-radius: 3px;
+    font-weight: 500;
+    cursor: pointer;
+    font-size: 0.9em;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.summary-button:hover:not(:disabled) {
+    background: #555;
+}
+
+.summary-button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.upload-btn {
+    padding: 8px 16px;
+    background: #333;
+    color: white;
+    border: none;
+    border-radius: 3px;
+    font-weight: 500;
+    cursor: pointer;
+    font-size: 0.9em;
+}
+
+.upload-btn:hover {
+    background: #555;
+}
+
+.upload-btn:active {
+    transform: translateY(0);
+}
+
+.back-button {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 20px;
+    background: #f5f5f5;
+    color: #333;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.95em;
+    font-weight: 500;
+    transition: all 0.2s ease;
+}
+
+.back-button:hover {
+    background: #e8e8e8;
+    border-color: #bbb;
+    transform: translateX(-2px);
+}
+
+.back-icon {
+    font-size: 1.2em;
+    font-weight: bold;
+}
+
+.update-button {
+    padding: 8px 16px;
+    background: #333;
+    color: white;
+    border: none;
+    border-radius: 3px;
+    font-size: 0.9em;
+    font-weight: 500;
+    cursor: pointer;
+}
+
+.update-button:hover {
+    background: #555;
+}
+
+.export-button {
+    padding: 8px 16px;
+    background: #333;
+    color: white;
+    border: none;
+    border-radius: 3px;
+    font-weight: 500;
+    cursor: pointer;
+    font-size: 0.9em;
+}
+
+.export-button:hover {
+    background: #555;
+}
+
+.accept-button {
+    margin-top: 12px;
+    padding: 8px 16px;
+    background: #4caf50;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    font-size: 0.9em;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.accept-button:hover:not(:disabled) {
+    background: #45a049;
+}
+
+.accept-button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.accept-button-small {
+    margin-left: 10px;
+    padding: 4px 10px;
+    background: #4caf50;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    font-size: 0.8em;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.accept-button-small:hover:not(:disabled) {
+    background: #45a049;
+}
+
+.accept-button-small:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.event-control-btn {
+    padding: 6px 12px;
+    background: #f8f9ff;
+    color: #333;
+    border: 1px solid #333;
+    border-radius: 6px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-size: 0.9em;
+    min-width: 36px;
+}
+
+.event-control-btn:hover:not(:disabled) {
+    background: #667eea;
+    color: white;
+    transform: translateY(-1px);
+}
+
+.event-control-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+    background: #f0f0f0;
+    border-color: #e0e0e0;
+    color: #999;
+}
+
+.modal-button {
+    padding: 10px 20px;
+    border: none;
+    border-radius: 6px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.modal-button-primary {
+    background: #667eea;
+    color: white;
+}
+
+.modal-button-primary:hover {
+    background: #5568d3;
+}
+
+.modal-button-secondary {
+    background: #e0e0e0;
+    color: #333;
+}
+
+.modal-button-secondary:hover {
+    background: #d0d0d0;
+}
+
+

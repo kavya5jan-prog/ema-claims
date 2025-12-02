@@ -1,0 +1,9 @@
+# Test data files directory
+# Place test files here:
+# - Valid PDFs (small, large, multi-page)
+# - Valid images (PNG, JPEG)
+# - Valid audio files (MP3, WAV, M4A)
+# - Invalid files (.txt, .docx, corrupted)
+# - Sample claim documents
+
+

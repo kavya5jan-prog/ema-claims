@@ -1,0 +1,120 @@
+{
+  "description": "Catalog of test data files required for automation tests",
+  "files": {
+    "valid_pdfs": {
+      "small": {
+        "name": "small-document.pdf",
+        "size": "<1MB",
+        "description": "Small PDF file for basic testing"
+      },
+      "large": {
+        "name": "large-document.pdf",
+        "size": ">10MB",
+        "description": "Large PDF file for performance testing"
+      },
+      "multi_page": {
+        "name": "multi-page-document.pdf",
+        "size": "~5MB",
+        "pages": "20+",
+        "description": "Multi-page PDF for comprehensive testing"
+      },
+      "with_images": {
+        "name": "pdf-with-images.pdf",
+        "description": "PDF containing embedded images"
+      },
+      "text_only": {
+        "name": "text-only.pdf",
+        "description": "PDF with only text content, no images"
+      }
+    },
+    "valid_images": {
+      "small_png": {
+        "name": "small-image.png",
+        "size": "<1MB",
+        "description": "Small PNG image"
+      },
+      "large_png": {
+        "name": "large-image.png",
+        "size": ">5MB",
+        "description": "Large PNG image for performance testing"
+      },
+      "jpeg": {
+        "name": "test-image.jpg",
+        "description": "JPEG image file"
+      },
+      "high_resolution": {
+        "name": "high-res-image.png",
+        "size": ">10MB",
+        "description": "Very high resolution image"
+      }
+    },
+    "valid_audio": {
+      "mp3": {
+        "name": "test-audio.mp3",
+        "description": "MP3 audio file"
+      },
+      "wav": {
+        "name": "test-audio.wav",
+        "description": "WAV audio file"
+      },
+      "m4a": {
+        "name": "test-audio.m4a",
+        "description": "M4A audio file"
+      },
+      "long_duration": {
+        "name": "long-audio.mp3",
+        "duration": ">10 minutes",
+        "description": "Long duration audio file"
+      }
+    },
+    "invalid_files": {
+      "txt": {
+        "name": "test.txt",
+        "description": "Text file (unsupported)"
+      },
+      "docx": {
+        "name": "test.docx",
+        "description": "Word document (unsupported)"
+      },
+      "empty": {
+        "name": "empty-file.pdf",
+        "size": "0 bytes",
+        "description": "Empty file"
+      },
+      "corrupted": {
+        "name": "corrupted.pdf",
+        "description": "Corrupted PDF file"
+      }
+    },
+    "sample_claim_documents": {
+      "claimant_statement": {
+        "name": "claimant_statement.pdf",
+        "source": "sample files/",
+        "description": "Sample claimant statement"
+      },
+      "police_report": {
+        "name": "police_report.pdf",
+        "source": "sample files/",
+        "description": "Sample police report"
+      },
+      "repair_estimate": {
+        "name": "repair_estimate.pdf",
+        "source": "sample files/",
+        "description": "Sample repair estimate"
+      },
+      "accident_images": {
+        "name": "accident_images.png",
+        "source": "sample files/",
+        "description": "Sample accident images"
+      }
+    }
+  },
+  "notes": [
+    "Test files can be generated programmatically or use existing sample files",
+    "Large files should be created on-demand to avoid repository bloat",
+    "Invalid files are created during test execution",
+    "Sample claim documents are available in the 'sample files/' directory"
+  ]
+}
+
+

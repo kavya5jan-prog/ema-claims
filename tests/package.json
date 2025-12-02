@@ -1,0 +1,27 @@
+{
+  "name": "auto-claims-test-automation",
+  "version": "1.0.0",
+  "description": "Test automation framework for Auto Claims Processing System",
+  "scripts": {
+    "test": "playwright test",
+    "test:navigation": "playwright test tests/navigation",
+    "test:edge-cases": "playwright test tests/edge-cases",
+    "test:chrome": "playwright test --project=chromium",
+    "test:firefox": "playwright test --project=firefox",
+    "test:safari": "playwright test --project=webkit",
+    "test:ui": "playwright test --ui",
+    "test:debug": "playwright test --debug",
+    "test:report": "playwright show-report",
+    "install:browsers": "playwright install"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.40.0",
+    "@axe-core/playwright": "^4.8.0",
+    "allure-playwright": "^2.9.2"
+  },
+  "dependencies": {
+    "dotenv": "^16.3.1"
+  }
+}
+
+

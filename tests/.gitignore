@@ -1,0 +1,29 @@
+# Test reports
+reports/
+*.log
+
+# Test artifacts
+test-results/
+playwright-report/
+
+# Environment variables
+.env
+
+# Node modules
+node_modules/
+
+# Screenshots and videos
+screenshots/
+videos/
+
+# Test data (large files)
+test-data/*.pdf
+test-data/*.png
+test-data/*.jpg
+test-data/*.mp3
+test-data/*.wav
+
+# Keep directory structure
+!test-data/.gitkeep
+
+

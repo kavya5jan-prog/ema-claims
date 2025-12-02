@@ -1,0 +1,360 @@
+/* Claim rationale view styles */
+.claim-rationale-view {
+    padding: 40px;
+}
+
+.claim-rationale-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 30px;
+    gap: 20px;
+}
+
+.claim-rationale-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.claim-rationale-header h2 {
+    color: #333;
+    font-size: 2em;
+    margin: 0;
+    flex: 1;
+}
+
+.claim-rationale-content {
+    background: white;
+}
+
+.rationale-display {
+    display: none;
+}
+
+.rationale-sections {
+    display: flex;
+    flex-direction: column;
+    gap: 30px;
+}
+
+.rationale-section {
+    background: white;
+    border: 2px solid #e0e0e0;
+    border-radius: 8px;
+    padding: 25px;
+    transition: all 0.2s ease;
+}
+
+.rationale-section:hover {
+    border-color: #333;
+}
+
+.rationale-section h3 {
+    color: #333;
+    font-size: 1.5em;
+    margin-bottom: 15px;
+    padding-bottom: 10px;
+    border-bottom: 2px solid #f0f0f0;
+}
+
+.rationale-content {
+    color: #333;
+    line-height: 1.8;
+    font-size: 1.05em;
+}
+
+.rationale-content p {
+    margin: 10px 0;
+}
+
+.evidence-subsection {
+    margin: 15px 0;
+    padding: 15px;
+    background: #f8f9ff;
+    border-radius: 6px;
+    border-left: 3px solid #333;
+}
+
+.evidence-subsection strong {
+    color: #333;
+    display: block;
+    margin-bottom: 8px;
+    font-size: 1.1em;
+}
+
+.evidence-subsection p {
+    margin: 0;
+    color: #666;
+}
+
+.rationale-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.rationale-list li {
+    padding: 12px 15px;
+    background: #f8f9ff;
+    border-radius: 6px;
+    border-left: 3px solid #333;
+    color: #333;
+    line-height: 1.6;
+}
+
+.recommendation-highlight {
+    background: #fff9c4;
+    padding: 20px;
+    border-radius: 6px;
+    border-left: 4px solid #f57f17;
+    font-weight: 500;
+}
+
+/* Escalation Package Styles */
+.escalation-package-view {
+    padding: 40px;
+}
+
+.escalation-package-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 30px;
+    gap: 20px;
+}
+
+.escalation-package-header h2 {
+    color: #333;
+    font-size: 2em;
+    margin: 0;
+    flex: 1;
+}
+
+.escalation-package-content {
+    background: white;
+}
+
+.escalation-sections {
+    display: flex;
+    flex-direction: column;
+    gap: 30px;
+}
+
+.escalation-section {
+    background: white;
+    border: 2px solid #e0e0e0;
+    border-radius: 8px;
+    padding: 25px;
+    transition: all 0.2s ease;
+}
+
+.escalation-section:hover {
+    border-color: #333;
+}
+
+.escalation-section h3 {
+    color: #333;
+    font-size: 1.5em;
+    margin-bottom: 15px;
+    padding-bottom: 10px;
+    border-bottom: 2px solid #f0f0f0;
+}
+
+.executive-summary-section {
+    background: #fff9c4;
+    border-color: #f57f17;
+}
+
+.executive-summary-section h3 {
+    color: #f57f17;
+    border-bottom-color: #f57f17;
+}
+
+.escalation-content {
+    color: #333;
+    line-height: 1.8;
+    font-size: 1.05em;
+}
+
+.risks-list {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+}
+
+.risk-item {
+    background: #f8f9ff;
+    border: 2px solid #e0e0e0;
+    border-radius: 8px;
+    padding: 20px;
+    transition: all 0.2s ease;
+}
+
+.risk-item:hover {
+    border-color: #333;
+}
+
+.risk-header {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    margin-bottom: 12px;
+    padding-bottom: 12px;
+    border-bottom: 2px solid #e0e0e0;
+}
+
+.risk-number {
+    background: #333;
+    color: white;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 600;
+    font-size: 1em;
+    flex-shrink: 0;
+}
+
+.risk-severity {
+    padding: 6px 14px;
+    border-radius: 12px;
+    font-weight: 600;
+    font-size: 0.9em;
+    text-transform: uppercase;
+}
+
+.risk-severity-high {
+    background: #f8d7da;
+    color: #721c24;
+}
+
+.risk-severity-medium {
+    background: #fff3cd;
+    color: #856404;
+}
+
+.risk-severity-low {
+    background: #d1ecf1;
+    color: #0c5460;
+}
+
+.risk-content {
+    color: #333;
+    line-height: 1.6;
+    margin-bottom: 10px;
+}
+
+.risk-content strong {
+    color: #333;
+}
+
+.risk-impact {
+    padding: 10px 15px;
+    background: white;
+    border-radius: 6px;
+    border-left: 3px solid #333;
+    color: #666;
+    font-size: 0.95em;
+    line-height: 1.6;
+}
+
+.risk-impact strong {
+    color: #333;
+}
+
+.escalation-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.escalation-list li {
+    padding: 12px 15px;
+    background: #f8f9ff;
+    border-radius: 6px;
+    border-left: 3px solid #333;
+    color: #333;
+    line-height: 1.6;
+}
+
+/* Edit form styles */
+.rationale-edit {
+    display: none;
+}
+
+.rationale-edit-form {
+    display: flex;
+    flex-direction: column;
+    gap: 25px;
+}
+
+.rationale-edit-section {
+    background: white;
+    border: 2px solid #e0e0e0;
+    border-radius: 8px;
+    padding: 25px;
+    transition: all 0.2s ease;
+}
+
+.rationale-edit-section:hover {
+    border-color: #333;
+}
+
+.rationale-edit-section label {
+    display: block;
+    color: #333;
+    font-size: 1.1em;
+    margin-bottom: 12px;
+    font-weight: 500;
+}
+
+.rationale-textarea {
+    width: 100%;
+    min-height: 120px;
+    padding: 12px;
+    border: 2px solid #e0e0e0;
+    border-radius: 6px;
+    font-size: 1em;
+    font-family: inherit;
+    line-height: 1.6;
+    color: #333;
+    resize: vertical;
+    transition: border-color 0.2s ease;
+    box-sizing: border-box;
+}
+
+.rationale-textarea:focus {
+    outline: none;
+    border-color: #333;
+    box-shadow: 0 0 0 3px rgba(51, 51, 51, 0.1);
+}
+
+.evidence-edit-subsection {
+    margin: 15px 0;
+    padding: 15px;
+    background: #f8f9ff;
+    border-radius: 6px;
+    border-left: 3px solid #333;
+}
+
+.evidence-edit-subsection label {
+    color: #333;
+    display: block;
+    margin-bottom: 8px;
+    font-size: 1em;
+    font-weight: 500;
+}
+
+.evidence-edit-subsection .rationale-textarea {
+    margin-top: 8px;
+}
+

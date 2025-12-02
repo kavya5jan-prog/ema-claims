@@ -20,3 +20,4 @@ vercel --prod
 echo "✅ Deployment complete!"
 echo "💡 Don't forget to set OPENAI_API_KEY environment variable in Vercel dashboard!"
 
+

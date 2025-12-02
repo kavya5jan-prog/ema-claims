@@ -1,0 +1,130 @@
+/* Form components */
+.filter-group {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    min-width: 150px;
+    flex: 1;
+}
+
+.filter-group label {
+    font-weight: 500;
+    color: #333;
+    font-size: 0.85em;
+}
+
+.filter-group select,
+.filter-group input {
+    padding: 6px 10px;
+    border: 1px solid #ddd;
+    border-radius: 3px;
+    font-size: 0.9em;
+    transition: border-color 0.2s ease;
+}
+
+.filter-group select:focus,
+.filter-group input:focus {
+    outline: none;
+    border-color: #333;
+}
+
+.percentage-input-group {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.percentage-input-group label {
+    font-weight: 600;
+    color: #333;
+    font-size: 1.1em;
+}
+
+.percentage-input-container {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: white;
+    border: 1px solid #333;
+    border-radius: 8px;
+    padding: 0 15px;
+    height: 50px;
+}
+
+.percentage-input-container input {
+    flex: 1;
+    border: none;
+    outline: none;
+    font-size: 1.5em;
+    font-weight: 700;
+    color: #333;
+    text-align: center;
+    background: transparent;
+}
+
+.percentage-input-container input::-webkit-inner-spin-button,
+.percentage-input-container input::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+
+.percentage-input-container input[type=number] {
+    -moz-appearance: textfield;
+}
+
+.percentage-symbol {
+    font-size: 1.5em;
+    font-weight: 700;
+    color: #333;
+}
+
+.recommendation-explanation {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.recommendation-explanation label {
+    font-weight: 600;
+    color: #333;
+    font-size: 1.1em;
+}
+
+.recommendation-explanation textarea {
+    width: 100%;
+    min-height: 200px;
+    padding: 15px;
+    border: 2px solid #e0e0e0;
+    border-radius: 8px;
+    font-family: inherit;
+    font-size: 1em;
+    line-height: 1.6;
+    resize: vertical;
+    transition: border-color 0.3s ease;
+}
+
+.recommendation-explanation textarea:focus {
+    outline: none;
+    border-color: #333;
+}
+
+.event-description {
+    width: 100%;
+    padding: 12px;
+    border: 2px solid #e0e0e0;
+    border-radius: 6px;
+    font-family: inherit;
+    font-size: 1em;
+    line-height: 1.6;
+    resize: vertical;
+    transition: border-color 0.3s ease;
+    color: #333;
+}
+
+.event-description:focus {
+    outline: none;
+    border-color: #333;
+}
+
+

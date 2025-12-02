@@ -1,4 +1,5 @@
 const fileInput = document.getElementById('fileInput');
+const bulkFileInput = document.getElementById('bulkFileInput');
 const loading = document.getElementById('loading');
 const error = document.getElementById('error');
 const fileListContainer = document.getElementById('fileListContainer');
@@ -8,7 +9,6 @@ const factMatrixView = document.getElementById('factMatrixView');
 const metadataDiv = document.getElementById('metadata');
 const pagesDiv = document.getElementById('pages');
 const factTableBody = document.getElementById('factTableBody');
-const conflictsPanel = document.getElementById('conflictsPanel');
 const conflictsContent = document.getElementById('conflictsContent');
 const acceptedDecisionsSection = document.getElementById('acceptedDecisionsSection');
 
@@ -23,12 +23,9 @@ let step1Completion = {
 const steps = [
     { id: 'files', name: 'Files', requires: [] },
     { id: 'fact-matrix', name: 'Fact Matrix', requires: ['files'] },
-    { id: 'liability-signals', name: 'Liability Signals', requires: ['fact-matrix'] },
-    { id: 'evidence-completeness', name: 'Evidence Completeness', requires: ['fact-matrix'] },
-    { id: 'liability-recommendation', name: 'Liability % Recommendation', requires: ['fact-matrix', 'liability-signals'] },
-    { id: 'timeline', name: 'Timeline Reconstruction', requires: ['fact-matrix', 'evidence-completeness'] },
-    { id: 'claim-rationale', name: 'Draft Claim Rationale', requires: ['fact-matrix', 'liability-signals'] },
-    { id: 'escalation-package', name: 'Supervisor Escalation', requires: ['fact-matrix', 'liability-signals'] }
+    { id: 'timeline', name: 'Timeline Reconstruction', requires: ['fact-matrix'] },
+    { id: 'liability-recommendation', name: 'Liability % Recommendation', requires: ['timeline'] },
+    { id: 'claim-rationale', name: 'Draft Claim Rationale', requires: ['fact-matrix'] }
 ];
 
 let currentStepIndex = 0;
@@ -40,6 +37,7 @@ let currentLiabilityRecommendationData = null;
 let currentTimelineData = null;
 let currentClaimRationaleData = null;
 let currentEscalationPackageData = null;
+let isEscalatedToSupervisor = false;
 
 // Predefined list of files to upload
 const expectedFiles = [
@@ -67,6 +65,14 @@ document.addEventListener('DOMContentLoaded', () => {
     loadTimeline();
 });
 
+// Helper function to check if there's at least one fact
+function hasAtLeastOneFact() {
+    return currentFactsData && 
+           currentFactsData.facts && 
+           Array.isArray(currentFactsData.facts) && 
+           currentFactsData.facts.length > 0;
+}
+
 // Check if a step is completed
 function isStepCompleted(stepId) {
     switch(stepId) {
@@ -74,18 +80,12 @@ function isStepCompleted(stepId) {
             return Object.keys(uploadedFiles).length > 0;
         case 'fact-matrix':
             return step1Completion.factsExtracted;
-        case 'liability-signals':
-            return step1Completion.liabilitySignals;
-        case 'evidence-completeness':
-            return step1Completion.evidenceComplete;
         case 'liability-recommendation':
             return currentLiabilityRecommendationData !== null;
         case 'timeline':
             return currentTimelineData !== null;
         case 'claim-rationale':
             return currentClaimRationaleData !== null;
-        case 'escalation-package':
-            return currentEscalationPackageData !== null;
         default:
             return false;
     }
@@ -96,7 +96,20 @@ function isStepAccessible(stepId) {
     const step = steps.find(s => s.id === stepId);
     if (!step) return false;
     
-    return step.requires.every(req => isStepCompleted(req));
+    // Check if all required steps are completed
+    const requirementsMet = step.requires.every(req => isStepCompleted(req));
+    
+    // For timeline and claim-rationale steps, also require at least one fact
+    if ((stepId === 'timeline' || stepId === 'claim-rationale') && !hasAtLeastOneFact()) {
+        return false;
+    }
+    
+    // For timeline and claim-rationale steps, require all conflicts to be resolved
+    if ((stepId === 'timeline' || stepId === 'claim-rationale') && !checkIfAllConflictsResolved()) {
+        return false;
+    }
+    
+    return requirementsMet;
 }
 
 // Update step indicators based on current state
@@ -146,15 +159,22 @@ function updateProgress() {
     });
 }
 
-// Tab switching function
-function switchTab(tabName) {
+    // Tab switching function
+function switchTab(tabName, skipLoadTimeline = false) {
     // Find step index
     const stepIndex = steps.findIndex(s => s.id === tabName);
     if (stepIndex === -1) return;
     
     // Check if step is accessible
     if (!isStepAccessible(tabName) && !isStepCompleted(tabName)) {
-        showError('Please complete the previous steps first.');
+        // Special message for timeline and claim-rationale when no facts exist
+        if ((tabName === 'timeline' || tabName === 'claim-rationale') && !hasAtLeastOneFact()) {
+            showError('Please extract at least one fact before accessing this step.');
+        } else if ((tabName === 'timeline' || tabName === 'claim-rationale') && !checkIfAllConflictsResolved()) {
+            showError('Please resolve all conflicts in the Fact Matrix before accessing this step.');
+        } else {
+            showError('Please complete the previous steps first.');
+        }
         return;
     }
     
@@ -176,17 +196,22 @@ function switchTab(tabName) {
     const tabIdMap = {
         'files': 'filesTab',
         'fact-matrix': 'factMatrixTab',
-        'liability-signals': 'liabilitySignalsTab',
-        'evidence-completeness': 'evidenceCompletenessTab',
         'liability-recommendation': 'liabilityRecommendationTab',
         'timeline': 'timelineTab',
-        'claim-rationale': 'claimRationaleTab',
-        'escalation-package': 'escalationPackageTab'
+        'claim-rationale': 'claimRationaleTab'
     };
     
-    // Load timeline from localStorage when switching to timeline tab
-    if (tabName === 'timeline') {
-        loadTimeline();
+    // Load timeline when switching to timeline tab
+    // Skip if we're displaying a newly generated timeline
+    if (tabName === 'timeline' && !skipLoadTimeline) {
+        // Check memory first, then localStorage, then show empty state
+        if (currentTimelineData && currentTimelineData.timeline) {
+            // Timeline exists in memory, display it
+            displayTimeline(currentTimelineData);
+        } else {
+            // Try loading from localStorage or show empty state
+            loadTimeline();
+        }
     }
     
     const targetTabId = tabIdMap[tabName];
@@ -196,6 +221,11 @@ function switchTab(tabName) {
             targetTab.style.display = 'block';
             targetTab.classList.add('active');
         }
+    }
+    
+    // Auto-display liability recommendation when switching to that tab if data exists
+    if (tabName === 'liability-recommendation' && currentLiabilityRecommendationData) {
+        displayLiabilityRecommendation(currentLiabilityRecommendationData, true);
     }
     
     // Hide file content view when switching tabs
@@ -218,7 +248,68 @@ function goToPreviousStep() {
 function goToNextStep() {
     if (currentStepIndex < steps.length - 1) {
         const nextStep = steps[currentStepIndex + 1];
-        if (isStepAccessible(nextStep.id) || isStepCompleted(nextStep.id)) {
+        
+        // If we're on Files tab and going to Fact Matrix, automatically extract facts and analyze signals
+        if (currentStepIndex === 0 && nextStep.id === 'fact-matrix') {
+            // Check if facts are already extracted
+            if (step1Completion.factsExtracted && currentFactsData) {
+                // Facts already extracted, just switch tab
+                switchTab(nextStep.id);
+                // If signals not analyzed yet, analyze them
+                if (!step1Completion.liabilitySignals) {
+                    analyzeLiabilitySignals();
+                }
+            } else {
+                // Extract facts first, then analyze signals
+                extractFactsAndSignals();
+            }
+        } else if (currentStepIndex === 1 && nextStep.id === 'timeline') {
+            // If we're on Fact Matrix tab and going to Timeline, check for conflicts first
+            if (currentFactsData && currentFactsData.conflicts && currentFactsData.conflicts.length > 0) {
+                // Check if all conflicts are resolved
+                if (!checkIfAllConflictsResolved()) {
+                    showError('Please resolve conflicts before proceeding.');
+                    return;
+                }
+            }
+            // If we're on Fact Matrix tab and going to Timeline, automatically trigger timeline generation
+            // which will also generate liability recommendation
+            // If conflicts are resolved (or there are no conflicts) and we have facts, allow navigation
+            if (checkIfAllConflictsResolved() && hasAtLeastOneFact()) {
+                generateTimeline();
+            } else if (isStepAccessible(nextStep.id) || isStepCompleted(nextStep.id)) {
+                generateTimeline();
+            } else {
+                showError('Please complete the current step first.');
+            }
+        } else if (currentStepIndex === 2 && nextStep.id === 'liability-recommendation') {
+            // If we're on Timeline tab and going to Liability Recommendation
+            // Allow forward navigation from timeline even if it's not marked as "completed"
+            // This matches the logic in updateNavigationButtons() for problematic steps
+            const currentStepId = steps[currentStepIndex].id;
+            const isProblematicStep = currentStepId === 'timeline' || 
+                                     currentStepId === 'liability-recommendation' || 
+                                     currentStepId === 'claim-rationale';
+            
+            // Allow navigation if step is accessible/completed OR if we're on a problematic step
+            if (isStepAccessible(nextStep.id) || isStepCompleted(nextStep.id) || isProblematicStep) {
+                // If recommendation data doesn't exist, generate it first
+                if (!currentLiabilityRecommendationData) {
+                    generateLiabilityRecommendationForTab();
+                } else {
+                    // Data exists, just switch to the tab (which will auto-display it)
+                    switchTab(nextStep.id);
+                }
+            } else {
+                showError('Please complete the current step first.');
+            }
+        } else if (currentStepIndex === 3 && nextStep.id === 'claim-rationale') {
+            // If we're on Liability Recommendation tab and going to Claim Rationale, 
+            // switch to the tab first, then generate the rationale
+            switchTab(nextStep.id);
+            // Generate claim rationale after switching to the tab
+            generateClaimRationale();
+        } else if (isStepAccessible(nextStep.id) || isStepCompleted(nextStep.id)) {
             switchTab(nextStep.id);
         } else {
             showError('Please complete the current step first.');
@@ -236,9 +327,43 @@ function updateNavigationButtons() {
     }
     
     if (nextButton) {
-        const nextStep = steps[currentStepIndex + 1];
-        const canGoNext = nextStep && (isStepAccessible(nextStep.id) || isStepCompleted(nextStep.id));
-        nextButton.disabled = !canGoNext || currentStepIndex >= steps.length - 1;
+        // Hide next button on claim rationale tab (last step)
+        if (currentStepIndex === steps.length - 1 || steps[currentStepIndex].id === 'claim-rationale') {
+            nextButton.style.display = 'none';
+        } else {
+            nextButton.style.display = 'inline-block';
+            // Enable next button if we're on files tab and have at least one file uploaded
+            if (currentStepIndex === 0) {
+                const hasUploadedFiles = Object.keys(uploadedFiles).length > 0;
+                nextButton.disabled = !hasUploadedFiles;
+            } else if (currentStepIndex === 1 && steps[currentStepIndex].id === 'fact-matrix') {
+                // On fact-matrix tab, disable Next button if there are no facts
+                const hasFacts = hasAtLeastOneFact();
+                nextButton.disabled = !hasFacts;
+            } else {
+                const nextStep = steps[currentStepIndex + 1];
+                const currentStepId = steps[currentStepIndex].id;
+                
+                // For timeline, liability-recommendation, and claim-rationale screens,
+                // allow forward navigation if user is on the screen (they've accessed it),
+                // even if the step isn't marked as completed.
+                // This prevents users from getting stuck on these screens.
+                const isProblematicStep = currentStepId === 'timeline' || 
+                                         currentStepId === 'liability-recommendation' || 
+                                         currentStepId === 'claim-rationale';
+                
+                // Allow forward navigation if:
+                // 1. Next step exists, AND
+                // 2. Either the next step is accessible/completed, OR
+                //    the user is on a problematic step (they've accessed it, so allow forward nav)
+                const canGoNext = nextStep && (
+                    isStepAccessible(nextStep.id) || 
+                    isStepCompleted(nextStep.id) ||
+                    isProblematicStep  // User is on timeline/liability/claim-rationale, allow forward navigation
+                );
+                nextButton.disabled = !canGoNext || currentStepIndex >= steps.length - 1;
+            }
+        }
     }
 }
 
@@ -253,34 +378,151 @@ fileInput.addEventListener('change', (e) => {
     }
 });
 
+// Bulk file input change handler
+bulkFileInput.addEventListener('change', (e) => {
+    if (e.target.files.length > 0) {
+        const files = Array.from(e.target.files);
+        // Reset input immediately so same files can be selected again
+        e.target.value = '';
+        handleBulkUpload(files);
+    }
+});
+
 function renderFileList() {
     fileList.innerHTML = '';
     
-    expectedFiles.forEach((expectedFile, index) => {
-        const fileItem = document.createElement('div');
-        fileItem.className = 'file-item';
-        
+    // Check if any files are uploaded
+    const hasUploadedFiles = Object.keys(uploadedFiles).length > 0;
+    
+    // Extract Facts button removed - only Next button is available
+    
+    // Always show upload section in Files tab - users can always upload files
+    const bigUploadButton = document.getElementById('bigUploadButton');
+    const uploadSection = document.querySelector('.upload-section-main');
+    if (bigUploadButton && uploadSection) {
+        // Always show upload section - users can always add more files
+        uploadSection.style.display = 'block';
+    }
+    
+    // Group all uploaded files by their mapped type
+    const mappedFiles = [];
+    const miscellaneousFiles = [];
+    const otherUnmatchedFiles = [];
+    
+    // First, collect all mapped files (files that match expected file types)
+    expectedFiles.forEach((expectedFile) => {
         const isUploaded = uploadedFiles[expectedFile.name] !== undefined;
         const fileData = uploadedFiles[expectedFile.name];
         
-        fileItem.innerHTML = `
-            <div class="file-item-info">
-                <span class="file-icon">${getFileIcon(expectedFile.type)}</span>
-                <span class="file-name ${isUploaded ? 'uploaded' : ''}" 
-                      ${isUploaded ? `onclick="viewFile('${expectedFile.name}')"` : ''}>
-                    ${escapeHtml(expectedFile.displayName)}
-                </span>
-                ${isUploaded ? '<span class="upload-status uploaded">✓ Uploaded</span>' : ''}
-            </div>
-            ${!isUploaded ? `
-                <button class="upload-btn" onclick="triggerFileUpload('${expectedFile.name}', ${index})">
-                    Upload
-                </button>
-            ` : ''}
-        `;
-        
-        fileList.appendChild(fileItem);
+        if (isUploaded) {
+            mappedFiles.push({ expectedFile, fileData, key: expectedFile.name });
+        }
     });
+    
+    // Then, collect unmatched files
+    Object.keys(uploadedFiles).forEach(key => {
+        const fileData = uploadedFiles[key];
+        const expectedFile = expectedFiles.find(f => f.name === key);
+        
+        if (!expectedFile && fileData) {
+            if (fileData.is_miscellaneous || (fileData.is_relevant && fileData.detected_source === 'unknown')) {
+                miscellaneousFiles.push({ key, fileData });
+            } else {
+                otherUnmatchedFiles.push({ key, fileData });
+            }
+        }
+    });
+    
+    // Show mapped files section (if any)
+    if (mappedFiles.length > 0) {
+        const mappedSection = document.createElement('div');
+        mappedSection.className = 'uploaded-files-section';
+        mappedSection.innerHTML = '<h3 style="margin: 20px 0 12px 0; font-size: 0.9em; color: #666;">Mapped Documents</h3>';
+        
+        const badgesContainer = document.createElement('div');
+        badgesContainer.className = 'uploaded-badges-container';
+        
+        mappedFiles.forEach(({ expectedFile, fileData, key }) => {
+            const originalFilename = fileData.originalFilename || fileData.filename || key;
+            const detectedSource = fileData.detected_source || 'unknown';
+            
+            const badge = document.createElement('div');
+            badge.className = 'uploaded-file-badge matched-badge-item';
+            badge.innerHTML = `
+                <span class="file-icon-small">${getFileIcon(fileData.type || 'pdf')}</span>
+                <span class="badge-file-name" onclick="viewUnmatchedFile('${key}')" title="Click to view">
+                    ${escapeHtml(originalFilename)}
+                </span>
+                <span class="detected-source-badge" title="Mapped to: ${expectedFile.displayName}">${expectedFile.displayName}</span>
+                <span class="badge-check">✓</span>
+            `;
+            badgesContainer.appendChild(badge);
+        });
+        
+        mappedSection.appendChild(badgesContainer);
+        fileList.appendChild(mappedSection);
+    }
+    
+    // Show miscellaneous files section (if any)
+    if (miscellaneousFiles.length > 0) {
+        const miscellaneousSection = document.createElement('div');
+        miscellaneousSection.className = 'uploaded-files-section';
+        miscellaneousSection.innerHTML = '<h3 style="margin: 20px 0 12px 0; font-size: 0.9em; color: #666;">Miscellaneous</h3>';
+        
+        const badgesContainer = document.createElement('div');
+        badgesContainer.className = 'uploaded-badges-container';
+        
+        miscellaneousFiles.forEach(({ key, fileData }) => {
+            const detectedSource = fileData.detected_source || 'unknown';
+            const originalFilename = fileData.originalFilename || fileData.filename || key;
+            
+            const badge = document.createElement('div');
+            badge.className = 'uploaded-file-badge unmatched-badge-item';
+            badge.innerHTML = `
+                <span class="file-icon-small">${getFileIcon(fileData.type || 'pdf')}</span>
+                <span class="badge-file-name" onclick="viewUnmatchedFile('${key}')" title="Click to view">
+                    ${escapeHtml(originalFilename)}
+                </span>
+                <span class="detected-source-badge" title="Auto-detected type: ${detectedSource}">${detectedSource}</span>
+                <span class="badge-check">✓</span>
+            `;
+            badgesContainer.appendChild(badge);
+        });
+        
+        miscellaneousSection.appendChild(badgesContainer);
+        fileList.appendChild(miscellaneousSection);
+    }
+    
+    // Show other unmatched files (if any)
+    if (otherUnmatchedFiles.length > 0) {
+        const unmatchedSection = document.createElement('div');
+        unmatchedSection.className = 'uploaded-files-section';
+        unmatchedSection.innerHTML = '<h3 style="margin: 20px 0 12px 0; font-size: 0.9em; color: #666;">Other Uploaded Files</h3>';
+        
+        const badgesContainer = document.createElement('div');
+        badgesContainer.className = 'uploaded-badges-container';
+        
+        otherUnmatchedFiles.forEach(({ key, fileData }) => {
+            const detectedSource = fileData.detected_source || 'unknown';
+            const originalFilename = fileData.originalFilename || fileData.filename || key;
+            
+            const badge = document.createElement('div');
+            badge.className = 'uploaded-file-badge unmatched-badge-item';
+            badge.innerHTML = `
+                <span class="file-icon-small">${getFileIcon(fileData.type || 'pdf')}</span>
+                <span class="badge-file-name" onclick="viewUnmatchedFile('${key}')" title="Click to view">
+                    ${escapeHtml(originalFilename)}
+                </span>
+                <span class="detected-source-badge" title="Auto-detected type: ${detectedSource}">${detectedSource}</span>
+                <span class="unmatched-badge" title="No matching expected file type">Unmatched</span>
+                <span class="badge-check">✓</span>
+            `;
+            badgesContainer.appendChild(badge);
+        });
+        
+        unmatchedSection.appendChild(badgesContainer);
+        fileList.appendChild(unmatchedSection);
+    }
 }
 
 function getFileIcon(type) {
@@ -288,6 +530,8 @@ function getFileIcon(type) {
         return '🖼️';
     } else if (type === 'pdf') {
         return '📄';
+    } else if (type === 'audio') {
+        return '🎵';
     }
     return '📎';
 }
@@ -340,10 +584,11 @@ function handleFileUpload(file, expectedFileName) {
             data.originalFilename = file.name;
             uploadedFiles[expectedFileName] = data;
             
-            // Re-render file list to show uploaded status
+            // Re-render file list to show uploaded status (this will also update button visibility)
             renderFileList();
             updateStepIndicators();
             updateProgress();
+            updateNavigationButtons(); // Update next button state
             
             // Show success message briefly
             showSuccess(`${expectedFile.displayName} uploaded successfully!`);
@@ -358,6 +603,24 @@ function handleFileUpload(file, expectedFileName) {
 
 function viewFile(expectedFileName) {
     const fileData = uploadedFiles[expectedFileName];
+    if (!fileData) {
+        showError('File not found.');
+        return;
+    }
+    
+    // Make sure we're on the Files tab
+    switchTab('files');
+    
+    // Hide file list, show content view
+    fileListContainer.style.display = 'none';
+    fileContentView.style.display = 'block';
+    
+    // Display file content
+    displayContent(fileData);
+}
+
+function viewUnmatchedFile(fileKey) {
+    const fileData = uploadedFiles[fileKey];
     if (!fileData) {
         showError('File not found.');
         return;
@@ -393,6 +656,14 @@ function showTabLoading(tabName, message = 'Processing...') {
             messageEl.textContent = message;
         }
         loadingEl.style.display = 'block';
+        
+        // For fact matrix, hide the table when showing loading
+        if (tabName === 'factMatrix') {
+            const factTable = document.getElementById('factTable');
+            if (factTable) {
+                factTable.style.display = 'none';
+            }
+        }
     }
 }
 
@@ -401,12 +672,22 @@ function hideTabLoading(tabName) {
     const loadingEl = document.getElementById(loadingId);
     if (loadingEl) {
         loadingEl.style.display = 'none';
+        
+        // For fact matrix, show the table when hiding loading
+        if (tabName === 'factMatrix') {
+            const factTable = document.getElementById('factTable');
+            if (factTable) {
+                factTable.style.display = 'table';
+            }
+        }
     }
 }
 
 function checkStep1Completion() {
+    // Step 1 is complete when facts are extracted and liability signals are generated
+    // evidenceComplete is optional and doesn't block progression
     return step1Completion.factsExtracted && 
-           step1Completion.evidenceComplete;
+           step1Completion.liabilitySignals;
 }
 
 function updateStep2Access() {
@@ -495,55 +776,97 @@ function extractFacts() {
     });
 }
 
+function extractFactsAndSignals() {
+    // Check if files are uploaded
+    if (!uploadedFiles || Object.keys(uploadedFiles).length === 0) {
+        showError('Please upload at least one file before extracting facts.');
+        return;
+    }
+    
+    // Navigate to Fact Matrix tab immediately
+    switchTab('fact-matrix');
+    
+    // Show loading state in Fact Matrix tab
+    showTabLoading('factMatrix', 'Extracting facts...');
+    error.style.display = 'none';
+    
+    // Prepare files data to send
+    const filesData = Object.values(uploadedFiles);
+    
+    // Send to backend
+    fetch('/extract-facts', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ files: filesData })
+    })
+    .then(async response => {
+        // Check if response is OK before parsing JSON
+        const data = await response.json();
+        
+        if (!response.ok) {
+            // Handle error responses
+            const errorMessage = data.error || `Server error: ${response.status} ${response.statusText}`;
+            throw new Error(errorMessage);
+        }
+        
+        return data;
+    })
+    .then(data => {
+        if (data.error) {
+            hideTabLoading('factMatrix');
+            showError(data.error);
+        } else if (data.facts) {
+            // Store facts data
+            currentFactsData = data;
+            // Mark Step 1 fact extraction as complete
+            step1Completion.factsExtracted = true;
+            updateStep2Access();
+            updateStepIndicators();
+            updateProgress();
+            // Hide loading indicator before displaying fact matrix
+            hideTabLoading('factMatrix');
+            // Display fact matrix first
+            displayFactMatrix(data);
+            
+            // Don't analyze liability signals automatically - wait for conflicts to be resolved
+        } else {
+            hideTabLoading('factMatrix');
+            showError('No facts received from server.');
+        }
+    })
+    .catch(err => {
+        hideTabLoading('factMatrix');
+        // Display the actual error message if available
+        const errorMessage = err.message || 'Failed to extract facts. Please try again.';
+        showError(errorMessage);
+        console.error('Extract facts error:', err);
+        
+        // Log additional details for debugging
+        if (err.message) {
+            console.error('Error details:', err.message);
+        }
+    });
+}
+
 function displayFactMatrix(factsData) {
     // Switch to Fact Matrix tab
     switchTab('fact-matrix');
     
-    // Check if conflicts exist and update layout
-    const hasConflicts = factsData.conflicts && factsData.conflicts.length > 0;
-    const allConflictsResolved = hasConflicts && factsData.conflicts.every((c, idx) => 
-        currentFactsData.acceptedVersions && currentFactsData.acceptedVersions[idx]
-    );
-    
-    const splitContainer = document.getElementById('factMatrixSplitContainer');
-    const factMatrixContent = document.querySelector('.fact-matrix-content');
-    
-    if (hasConflicts && !allConflictsResolved) {
-        // Show split layout: conflicts panel left, fact matrix right
-        if (splitContainer) {
-            splitContainer.style.display = 'flex';
-        }
-        if (conflictsPanel) {
-            conflictsPanel.style.display = 'block';
-        }
-        if (acceptedDecisionsSection) {
-            acceptedDecisionsSection.style.display = 'none';
-        }
-        if (factMatrixContent) {
-            factMatrixContent.style.flex = '1';
-        }
-        displayConflicts(factsData.conflicts);
-    } else {
-        // Show single column layout: fact matrix top, accepted decisions bottom
-        if (splitContainer) {
-            splitContainer.style.display = 'block';
-        }
-        if (conflictsPanel) {
-            conflictsPanel.style.display = 'none';
-        }
-        if (factMatrixContent) {
-            factMatrixContent.style.flex = 'none';
-        }
-        if (acceptedDecisionsSection && currentFactsData.acceptedVersions && Object.keys(currentFactsData.acceptedVersions).length > 0) {
-            acceptedDecisionsSection.style.display = 'block';
-            displayAcceptedDecisions();
-        } else if (acceptedDecisionsSection) {
-            acceptedDecisionsSection.style.display = 'none';
-        }
-    }
-    
     // Render facts table
     renderFactTable(factsData.facts);
+    
+    // Check if there are any conflicts
+    const hasConflicts = factsData.conflicts && factsData.conflicts.length > 0;
+    
+    // If no conflicts, automatically analyze liability signals
+    if (!hasConflicts && (!step1Completion.liabilitySignals || !currentLiabilitySignalsData)) {
+        showSuccess('Generating liability signals...');
+        setTimeout(() => {
+            analyzeLiabilitySignals();
+        }, 500);
+    }
     
     // Scroll to top of tab
     document.getElementById('factMatrixTab').scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -553,7 +876,7 @@ function renderFactTable(facts) {
     factTableBody.innerHTML = '';
     
     if (!facts || facts.length === 0) {
-        factTableBody.innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 20px;">No facts extracted.</td></tr>';
+        factTableBody.innerHTML = '<tr><td colspan="9" style="text-align: center; padding: 20px;">No facts extracted.</td></tr>';
         return;
     }
     
@@ -563,9 +886,9 @@ function renderFactTable(facts) {
     });
 }
 
-function checkIfFactIsContradicting(fact, factIndex) {
+function getFactConflictInfo(fact, factIndex) {
     if (!currentFactsData || !currentFactsData.conflicts || currentFactsData.conflicts.length === 0) {
-        return false;
+        return null;
     }
     
     const factSource = fact.source || '';
@@ -573,7 +896,8 @@ function checkIfFactIsContradicting(fact, factIndex) {
     const factValueLower = factValue.toLowerCase().trim();
     
     // Check if this fact is part of any conflict
-    for (const conflict of currentFactsData.conflicts) {
+    for (let i = 0; i < currentFactsData.conflicts.length; i++) {
+        const conflict = currentFactsData.conflicts[i];
         const conflictSources = conflict.sources || [];
         const conflictingValues = conflict.conflicting_values || [];
         
@@ -586,7 +910,7 @@ function checkIfFactIsContradicting(fact, factIndex) {
                 if (factValueLower === confValueLower || 
                     factValueLower.includes(confValueLower) || 
                     confValueLower.includes(factValueLower)) {
-                    return true;
+                    return { conflictIndex: i, conflict: conflict };
                 }
             }
             
@@ -601,14 +925,44 @@ function checkIfFactIsContradicting(fact, factIndex) {
                     if (factValueLower === detailValueLower || 
                         factValueLower.includes(detailValueLower) || 
                         detailValueLower.includes(factValueLower)) {
-                        return true;
+                        return { conflictIndex: i, conflict: conflict };
                     }
                 }
             }
         }
     }
     
-    return false;
+    return null;
+}
+
+function getFactSignalInfo(fact, factIndex) {
+    if (!currentLiabilitySignalsData || !currentLiabilitySignalsData.signals || currentLiabilitySignalsData.signals.length === 0) {
+        return null;
+    }
+    
+    // Try to match fact with signal by related facts or evidence text
+    const factText = (fact.extracted_fact || '').toLowerCase();
+    const sourceText = (fact.source_text || '').toLowerCase();
+    
+    for (const signal of currentLiabilitySignalsData.signals) {
+        const evidenceText = (signal.evidence_text || '').toLowerCase();
+        const relatedFacts = signal.related_facts || [];
+        
+        // Check if fact text appears in evidence or related facts
+        if (evidenceText.includes(factText) || sourceText.includes(evidenceText.substring(0, 50))) {
+            return signal;
+        }
+        
+        // Check related facts
+        for (const relatedFact of relatedFacts) {
+            const relatedText = typeof relatedFact === 'string' ? relatedFact.toLowerCase() : JSON.stringify(relatedFact).toLowerCase();
+            if (relatedText.includes(factText) || factText.includes(relatedText.substring(0, 50))) {
+                return signal;
+            }
+        }
+    }
+    
+    return null;
 }
 
 function renderFactRow(fact, index) {
@@ -640,17 +994,7 @@ function renderFactRow(fact, index) {
     // Extracted fact
     const extractedFactCell = document.createElement('td');
     const extractedFactText = fact.extracted_fact || '';
-    if (fact.resolved && fact.resolved_value) {
-        // Show resolved indicator
-        extractedFactCell.innerHTML = `
-            <div style="display: flex; align-items: center; gap: 5px;">
-                <span>${escapeHtml(extractedFactText)}</span>
-                <span class="resolved-badge" title="Resolved from conflict: ${escapeHtml(fact.resolved_value)}" style="background: #4CAF50; color: white; padding: 2px 6px; border-radius: 3px; font-size: 10px; font-weight: bold;">✓ Resolved</span>
-            </div>
-        `;
-    } else {
-        extractedFactCell.textContent = extractedFactText;
-    }
+    extractedFactCell.textContent = extractedFactText;
     
     // Category (with badge)
     const categoryCell = document.createElement('td');
@@ -662,45 +1006,82 @@ function renderFactRow(fact, index) {
     const source = fact.source || 'unknown';
     sourceCell.innerHTML = `<span class="source-badge source-${source}">${source.replace('_', ' ')}</span>`;
     
-    // Implied (flag indicator)
-    const impliedCell = document.createElement('td');
-    if (fact.is_implied) {
-        const impliedSpan = document.createElement('span');
-        impliedSpan.className = 'implied-flag implied-flag-implied';
-        impliedSpan.textContent = 'Implied';
-        impliedCell.appendChild(impliedSpan);
+    // Conflict column (check if fact is part of any conflict)
+    const conflictCell = document.createElement('td');
+    const conflictInfo = getFactConflictInfo(fact, index);
+    if (conflictInfo) {
+        // Check if this conflict is resolved
+        // Use String() for consistent key type matching
+        const isResolved = currentFactsData && 
+                          currentFactsData.acceptedVersions && 
+                          currentFactsData.acceptedVersions[String(conflictInfo.conflictIndex)];
+        
+        const conflictBadge = document.createElement('span');
+        if (isResolved) {
+            conflictBadge.className = 'conflict-badge resolved';
+            conflictBadge.textContent = 'Resolved';
+            conflictBadge.style.background = '#4CAF50';
+            conflictBadge.style.color = 'white';
+            conflictBadge.style.cursor = 'pointer';
+            conflictBadge.onclick = (e) => {
+                e.stopPropagation();
+                showResolvedConflictDetails(conflictInfo.conflictIndex, fact, index);
+            };
+        } else {
+            conflictBadge.className = 'conflict-badge has-conflict';
+            conflictBadge.textContent = 'Conflict';
+            conflictBadge.onclick = (e) => {
+                e.stopPropagation();
+                openConflictModal(conflictInfo.conflictIndex, fact, index);
+            };
+        }
+        conflictCell.appendChild(conflictBadge);
     } else {
-        const explicitSpan = document.createElement('span');
-        explicitSpan.className = 'implied-flag implied-flag-explicit';
-        explicitSpan.textContent = 'Explicit';
-        impliedCell.appendChild(explicitSpan);
+        const noConflictBadge = document.createElement('span');
+        noConflictBadge.className = 'conflict-badge no-conflict';
+        noConflictBadge.textContent = '—';
+        conflictCell.appendChild(noConflictBadge);
     }
     
-    // Contradicting (check if fact is part of any conflict)
-    const contradictingCell = document.createElement('td');
-    const isContradicting = checkIfFactIsContradicting(fact, index);
-    if (isContradicting) {
-        const contradictingSpan = document.createElement('span');
-        contradictingSpan.className = 'contradicting-badge contradicting-yes';
-        contradictingSpan.textContent = 'Yes';
-        contradictingSpan.style.background = '#f44336';
-        contradictingSpan.style.color = 'white';
-        contradictingSpan.style.padding = '2px 8px';
-        contradictingSpan.style.borderRadius = '3px';
-        contradictingSpan.style.fontSize = '12px';
-        contradictingSpan.style.fontWeight = 'bold';
-        contradictingCell.appendChild(contradictingSpan);
+    // Signal Type column (from liability signals)
+    const signalTypeCell = document.createElement('td');
+    signalTypeCell.className = 'liability-signal-type-cell';
+    signalTypeCell.dataset.factIndex = index;
+    const signalInfo = getFactSignalInfo(fact, index);
+    if (signalInfo && signalInfo.signal_type) {
+        const signalType = signalInfo.signal_type || 'unknown';
+        signalTypeCell.innerHTML = `<span class="signal-type-badge signal-type-${signalType.replace(/\s+/g, '-').toLowerCase()}">${escapeHtml(signalType)}</span>`;
     } else {
-        const notContradictingSpan = document.createElement('span');
-        notContradictingSpan.className = 'contradicting-badge contradicting-no';
-        notContradictingSpan.textContent = 'No';
-        notContradictingSpan.style.background = '#4CAF50';
-        notContradictingSpan.style.color = 'white';
-        notContradictingSpan.style.padding = '2px 8px';
-        notContradictingSpan.style.borderRadius = '3px';
-        notContradictingSpan.style.fontSize = '12px';
-        notContradictingSpan.style.fontWeight = 'bold';
-        contradictingCell.appendChild(notContradictingSpan);
+        signalTypeCell.textContent = '—';
+    }
+    
+    // Impact on Liability column
+    const impactCell = document.createElement('td');
+    impactCell.className = 'liability-impact-cell';
+    impactCell.dataset.factIndex = index;
+    if (signalInfo && signalInfo.impact_on_liability) {
+        impactCell.textContent = signalInfo.impact_on_liability;
+    } else {
+        impactCell.textContent = '—';
+    }
+    
+    // Severity column
+    const severityCell = document.createElement('td');
+    severityCell.className = 'liability-severity-cell';
+    severityCell.dataset.factIndex = index;
+    if (signalInfo && signalInfo.severity_score !== undefined) {
+        const severity = signalInfo.severity_score || 0;
+        const severityPercent = Math.round(severity * 100);
+        severityCell.innerHTML = `
+            <div class="severity-container">
+                <div class="severity-bar">
+                    <div class="severity-fill" style="width: ${severityPercent}%"></div>
+                </div>
+                <span class="severity-text">${severityPercent}%</span>
+            </div>
+        `;
+    } else {
+        severityCell.textContent = '—';
     }
     
     // Add resolved class to row if fact is resolved
@@ -714,8 +1095,10 @@ function renderFactRow(fact, index) {
     row.appendChild(extractedFactCell);
     row.appendChild(categoryCell);
     row.appendChild(sourceCell);
-    row.appendChild(impliedCell);
-    row.appendChild(contradictingCell);
+    row.appendChild(conflictCell);
+    row.appendChild(signalTypeCell);
+    row.appendChild(impactCell);
+    row.appendChild(severityCell);
     
     return row;
 }
@@ -964,10 +1347,11 @@ function acceptConflictVersion(conflictIndex, variantIndex, acceptedValue) {
     }
     
     // Store accepted version
+    // Convert conflictIndex to string for consistent key type (matching checkIfAllConflictsResolved)
     if (!currentFactsData.acceptedVersions) {
         currentFactsData.acceptedVersions = {};
     }
-    currentFactsData.acceptedVersions[conflictIndex] = {
+    currentFactsData.acceptedVersions[String(conflictIndex)] = {
         value: acceptedValue,
         variantIndex: variantIndex,
         timestamp: new Date().toISOString()
@@ -1061,10 +1445,8 @@ function acceptConflictVersion(conflictIndex, variantIndex, acceptedValue) {
             fact.resolved_timestamp = new Date().toISOString();
         });
         
-        // Re-render the fact table to reflect updates
-        if (factsToUpdate.length > 0) {
-            renderFactTable(currentFactsData.facts);
-        }
+        // Re-render the fact table to reflect updates (always re-render to update conflict badges)
+        renderFactTable(currentFactsData.facts);
     }
     
     // Update UI to show accepted version
@@ -1089,23 +1471,312 @@ function acceptConflictVersion(conflictIndex, variantIndex, acceptedValue) {
         });
     }
     
+    showSuccess(`Accepted version: "${acceptedValue}" - Fact matrix updated.`);
+    
     // Check if all conflicts are resolved
-    const allResolved = currentFactsData.conflicts && currentFactsData.conflicts.every((c, idx) => 
-        currentFactsData.acceptedVersions && currentFactsData.acceptedVersions[idx]
-    );
+    const allResolved = checkIfAllConflictsResolved();
     
     if (allResolved) {
         // Switch to resolved layout
         displayFactMatrix(currentFactsData);
+        
+        // Update step access in case Step 1 is now complete
+        updateStep2Access();
+        updateStepIndicators();
+        updateProgress();
+        
+        // Show popup when all conflicts are resolved
+        showAllConflictsResolvedPopup();
     }
     
-    showSuccess(`Accepted version: "${acceptedValue}" - Fact matrix updated.`);
+    // Close modal
+    closeConflictModal();
+}
+
+function openConflictModal(conflictIndex, fact, factIndex) {
+    if (!currentFactsData || !currentFactsData.conflicts || !currentFactsData.conflicts[conflictIndex]) {
+        showError('Conflict not found.');
+        return;
+    }
     
-    // Re-analyze liability signals if they exist (to reflect updated facts)
-    if (currentLiabilitySignalsData && currentLiabilitySignalsData.signals && currentLiabilitySignalsData.signals.length > 0) {
-        showSuccess('Updating liability signals with resolved conflicts...');
-        // Automatically re-analyze liability signals with updated facts
+    const conflict = currentFactsData.conflicts[conflictIndex];
+    const modal = document.getElementById('conflictModal');
+    const modalBody = document.getElementById('conflictModalBody');
+    
+    if (!modal || !modalBody) {
+        showError('Modal elements not found.');
+        return;
+    }
+    
+    // Build variant HTML
+    const valueDetails = conflict.value_details || [];
+    const recommendedVersion = conflict.recommended_version || '';
+    const evidence = conflict.evidence || '';
+    
+    let variantsHtml = '';
+    if (valueDetails.length > 0) {
+        variantsHtml = valueDetails.map((valueDetail, variantIndex) => {
+            const value = valueDetail.value || '';
+            const sources = valueDetail.sources || [];
+            const snippets = valueDetail.source_snippets || [];
+            const isRecommended = value === recommendedVersion;
+            // Use String() for consistent key type matching
+            const isAccepted = currentFactsData.acceptedVersions && 
+                              currentFactsData.acceptedVersions[String(conflictIndex)] &&
+                              currentFactsData.acceptedVersions[String(conflictIndex)].value === value;
+            
+            return `
+                <div class="conflict-variant-item ${isRecommended ? 'recommended' : ''} ${isAccepted ? 'selected' : ''}" 
+                     data-variant-index="${variantIndex}"
+                     onclick="selectConflictVariant(${conflictIndex}, ${variantIndex}, '${escapeHtml(value).replace(/'/g, "\\'")}')">
+                    <div class="conflict-variant-header">
+                        <span class="conflict-variant-value">${escapeHtml(value)}</span>
+                        <div class="conflict-variant-badges">
+                            ${isRecommended ? '<span class="recommended-badge">Recommended</span>' : ''}
+                            ${isAccepted ? '<span class="accepted-badge">Accepted</span>' : ''}
+                        </div>
+                    </div>
+                    <div class="conflict-variant-sources">
+                        <strong>Sources:</strong> ${sources.map(s => `<span class="source-badge source-${s}">${s.replace('_', ' ')}</span>`).join(', ')}
+                    </div>
+                    ${snippets.length > 0 ? `
+                        <div class="conflict-variant-snippets">
+                            ${snippets.map(snippet => `<div class="conflict-snippet">${escapeHtml(snippet)}</div>`).join('')}
+                        </div>
+                    ` : ''}
+                </div>
+            `;
+        }).join('');
+    } else {
+        // Fallback to conflicting_values if value_details not available
+        variantsHtml = (conflict.conflicting_values || []).map((value, variantIndex) => {
+            const isRecommended = value === recommendedVersion;
+            return `
+                <div class="conflict-variant-item ${isRecommended ? 'recommended' : ''}" 
+                     data-variant-index="${variantIndex}"
+                     onclick="selectConflictVariant(${conflictIndex}, ${variantIndex}, '${escapeHtml(value).replace(/'/g, "\\'")}')">
+                    <div class="conflict-variant-header">
+                        <span class="conflict-variant-value">${escapeHtml(value)}</span>
+                        ${isRecommended ? '<span class="recommended-badge">Recommended</span>' : ''}
+                    </div>
+                </div>
+            `;
+        }).join('');
+    }
+    
+    // Build modal content
+    modalBody.innerHTML = `
+        <div>
+            <h4 style="margin-top: 0;">${escapeHtml(conflict.fact_description || 'Conflict Resolution')}</h4>
+            ${conflict.severity ? `<p><strong>Severity:</strong> <span class="severity-badge severity-${conflict.severity}">${conflict.severity.toUpperCase()}</span></p>` : ''}
+            ${conflict.explanation ? `<p><strong>Explanation:</strong> ${escapeHtml(conflict.explanation)}</p>` : ''}
+            ${recommendedVersion && evidence ? `
+                <div class="conflict-recommendation" style="margin: 15px 0; padding: 15px; background: #e7f3ff; border-radius: 6px; border-left: 4px solid #2196F3;">
+                    <div class="recommendation-header">
+                        <strong>AI Recommendation:</strong>
+                    </div>
+                    <div class="recommended-value">
+                        <strong>Recommended Version:</strong> <span class="highlight">${escapeHtml(recommendedVersion)}</span>
+                    </div>
+                    <div class="recommendation-evidence">
+                        <strong>Evidence:</strong>
+                        <p>${escapeHtml(evidence)}</p>
+                    </div>
+                </div>
+            ` : ''}
+            <div style="margin-top: 20px;">
+                <strong>Select a variant:</strong>
+                <div class="variants-container" style="margin-top: 10px;">
+                    ${variantsHtml}
+                </div>
+            </div>
+        </div>
+    `;
+    
+    // Show modal
+    modal.style.display = 'block';
+    
+    // Store current conflict info for selection
+    modal.dataset.conflictIndex = conflictIndex;
+    modal.dataset.factIndex = factIndex;
+}
+
+function selectConflictVariant(conflictIndex, variantIndex, value) {
+    // Call the existing acceptConflictVersion function
+    acceptConflictVersion(conflictIndex, variantIndex, value);
+}
+
+function showResolvedConflictDetails(conflictIndex, fact, factIndex) {
+    if (!currentFactsData || !currentFactsData.conflicts || !currentFactsData.conflicts[conflictIndex]) {
+        showError('Conflict not found.');
+        return;
+    }
+    
+    const conflict = currentFactsData.conflicts[conflictIndex];
+    // Use String() for consistent key type matching
+    const acceptedVersion = currentFactsData.acceptedVersions && currentFactsData.acceptedVersions[String(conflictIndex)];
+    const modal = document.getElementById('conflictModal');
+    const modalBody = document.getElementById('conflictModalBody');
+    
+    if (!modal || !modalBody) {
+        showError('Modal elements not found.');
+        return;
+    }
+    
+    const acceptedValue = acceptedVersion ? acceptedVersion.value : 'N/A';
+    const acceptedTimestamp = acceptedVersion ? new Date(acceptedVersion.timestamp).toLocaleString() : 'N/A';
+    
+    // Build value variants display
+    const valueDetails = conflict.value_details || [];
+    let variantsHtml = '';
+    
+    if (valueDetails.length > 0) {
+        variantsHtml = valueDetails.map((valueDetail, variantIndex) => {
+            const value = valueDetail.value || '';
+            const sources = valueDetail.sources || [];
+            const snippets = valueDetail.source_snippets || [];
+            const isAccepted = value === acceptedValue;
+            
+            return `
+                <div class="conflict-variant-item ${isAccepted ? 'selected' : ''}" style="opacity: ${isAccepted ? '1' : '0.6'};">
+                    <div class="conflict-variant-header">
+                        <span class="conflict-variant-value">${escapeHtml(value)}</span>
+                        <div class="conflict-variant-badges">
+                            ${isAccepted ? '<span class="accepted-badge">Accepted</span>' : ''}
+                        </div>
+                    </div>
+                    <div class="conflict-variant-sources">
+                        <strong>Sources:</strong> ${sources.map(s => `<span class="source-badge source-${s}">${s.replace('_', ' ')}</span>`).join(', ')}
+                    </div>
+                    ${snippets.length > 0 ? `
+                        <div class="conflict-variant-snippets">
+                            ${snippets.map(snippet => `<div class="conflict-snippet">${escapeHtml(snippet)}</div>`).join('')}
+                        </div>
+                    ` : ''}
+                </div>
+            `;
+        }).join('');
+    } else {
+        // Fallback to conflicting_values
+        variantsHtml = (conflict.conflicting_values || []).map((value) => {
+            const isAccepted = value === acceptedValue;
+            return `
+                <div class="conflict-variant-item ${isAccepted ? 'selected' : ''}" style="opacity: ${isAccepted ? '1' : '0.6'};">
+                    <div class="conflict-variant-header">
+                        <span class="conflict-variant-value">${escapeHtml(value)}</span>
+                        ${isAccepted ? '<span class="accepted-badge">Accepted</span>' : ''}
+                    </div>
+                </div>
+            `;
+        }).join('');
+    }
+    
+    // Build modal content
+    modalBody.innerHTML = `
+        <div>
+            <h4 style="margin-top: 0;">Resolved Conflict Details</h4>
+            <div style="margin: 15px 0; padding: 15px; background: #e8f5e9; border-radius: 6px; border-left: 4px solid #4CAF50;">
+                <div style="margin-bottom: 10px;">
+                    <strong>Conflict Description:</strong> ${escapeHtml(conflict.fact_description || 'Conflict')}
+                </div>
+                <div style="margin-bottom: 10px;">
+                    <strong>Accepted Value:</strong> <span class="highlight" style="color: #2e7d32; font-weight: bold;">${escapeHtml(acceptedValue)}</span>
+                </div>
+                <div>
+                    <strong>Resolved At:</strong> ${acceptedTimestamp}
+                </div>
+            </div>
+            ${conflict.explanation ? `<p><strong>Explanation:</strong> ${escapeHtml(conflict.explanation)}</p>` : ''}
+            <div style="margin-top: 20px;">
+                <strong>All Variants:</strong>
+                <div class="variants-container" style="margin-top: 10px;">
+                    ${variantsHtml}
+                </div>
+            </div>
+            <div style="margin-top: 20px; text-align: right;">
+                <button class="summary-button" onclick="closeConflictModal()" style="padding: 8px 20px;">Close</button>
+            </div>
+        </div>
+    `;
+    
+    // Show modal
+    modal.style.display = 'block';
+}
+
+function showAllConflictsResolvedPopup() {
+    const modal = document.getElementById('conflictModal');
+    const modalBody = document.getElementById('conflictModalBody');
+    
+    if (!modal || !modalBody) {
+        showError('Modal elements not found.');
+        return;
+    }
+    
+    // Build modal content
+    modalBody.innerHTML = `
+        <div style="text-align: center; padding: 20px;">
+            <div style="font-size: 48px; margin-bottom: 20px;">✓</div>
+            <h3 style="margin-top: 0; color: #4CAF50;">Thank You for Closing All Conflicts</h3>
+            <p style="font-size: 1.1em; color: #666; margin: 20px 0;">
+                We will now generate liability signals based on the resolved conflicts.
+            </p>
+            <div style="margin-top: 30px;">
+                <button class="summary-button" onclick="closeAllConflictsResolvedPopup()" style="padding: 12px 30px; font-size: 1em;">
+                    Okay
+                </button>
+            </div>
+        </div>
+    `;
+    
+    // Show modal
+    modal.style.display = 'block';
+    
+    // Store flag to indicate this is the all-conflicts-resolved popup
+    modal.dataset.allConflictsResolved = 'true';
+}
+
+function closeAllConflictsResolvedPopup() {
+    const modal = document.getElementById('conflictModal');
+    if (modal) {
+        modal.style.display = 'none';
+        delete modal.dataset.allConflictsResolved;
+    }
+    
+    // If liability signals haven't been analyzed yet, analyze them now
+    if (!step1Completion.liabilitySignals || !currentLiabilitySignalsData) {
+        // Automatically analyze liability signals
+        setTimeout(() => {
+            analyzeLiabilitySignals();
+        }, 500);
+    } else {
+        // Re-analyze liability signals if they exist (to reflect updated facts)
         analyzeLiabilitySignals();
+    }
+}
+
+function closeConflictModal() {
+    const modal = document.getElementById('conflictModal');
+    if (modal) {
+        // Check if this is the all-conflicts-resolved popup
+        if (modal.dataset.allConflictsResolved === 'true') {
+            closeAllConflictsResolvedPopup();
+            return;
+        }
+        modal.style.display = 'none';
+        delete modal.dataset.conflictIndex;
+        delete modal.dataset.factIndex;
+    }
+}
+
+// Close modal when clicking outside
+window.onclick = function(event) {
+    const conflictModal = document.getElementById('conflictModal');
+    if (event.target === conflictModal) {
+        closeConflictModal();
+    }
+    const supervisorEscalationModal = document.getElementById('supervisorEscalationModal');
+    if (event.target === supervisorEscalationModal) {
+        closeSupervisorEscalationModal();
     }
 }
 
@@ -1149,6 +1820,44 @@ function displayContent(data) {
                 <img src="${data.data}" alt="${escapeHtml(data.filename || 'Image')}" class="uploaded-image">
             </div>
         `;
+    } else if (data.type === 'audio') {
+        // Display audio transcription
+        const transcription = data.transcription || (data.pages && data.pages.length > 0 ? data.pages[0].text : '');
+        metadataDiv.innerHTML = `
+            <h2>Audio Recording Information</h2>
+            <div class="metadata-item">
+                <strong>Filename:</strong> ${escapeHtml(data.filename || data.originalFilename || 'Unknown')}
+            </div>
+            <div class="metadata-item">
+                <strong>Type:</strong> Audio Recording
+            </div>
+            ${transcription ? `<div class="metadata-item"><strong>Transcription Status:</strong> Complete</div>` : '<div class="metadata-item"><strong>Transcription Status:</strong> Not available</div>'}
+        `;
+        
+        pagesDiv.innerHTML = '';
+        
+        if (!transcription || transcription.trim() === '') {
+            pagesDiv.innerHTML = '<div class="empty-text">No transcription available for this audio file.</div>';
+        } else {
+            const pageDiv = document.createElement('div');
+            pageDiv.className = 'page';
+            
+            // Page header
+            const pageHeader = document.createElement('div');
+            pageHeader.className = 'page-header';
+            pageHeader.innerHTML = `
+                <span class="page-number">Transcription</span>
+            `;
+            
+            // Transcription text
+            const transcriptionText = document.createElement('div');
+            transcriptionText.className = 'page-text';
+            transcriptionText.textContent = transcription;
+            
+            pageDiv.appendChild(pageHeader);
+            pageDiv.appendChild(transcriptionText);
+            pagesDiv.appendChild(pageDiv);
+        }
     } else {
         // Display PDF content
         const metadata = data.metadata || {};
@@ -1277,11 +1986,12 @@ function analyzeLiabilitySignals() {
         return;
     }
     
-    // Switch to Liability Signals tab
-    switchTab('liability-signals');
+    // Switch to Fact Matrix tab (if not already there)
+    switchTab('fact-matrix');
     
-    // Show loading state in Liability Signals tab
-    showTabLoading('liabilitySignals', 'Analyzing liability signals...');
+    // Show "Processing..." in liability columns immediately
+    showProcessingInLiabilityColumns();
+    
     error.style.display = 'none';
     
     // Prepare facts data to send
@@ -1297,7 +2007,7 @@ function analyzeLiabilitySignals() {
     })
     .then(response => response.json())
     .then(data => {
-        hideTabLoading('liabilitySignals');
+        hideTabLoading('factMatrix');
         
         if (data.error) {
             showError(data.error);
@@ -1309,28 +2019,116 @@ function analyzeLiabilitySignals() {
             updateStep2Access();
             updateStepIndicators();
             updateProgress();
-            // Display liability signals
+            // Display liability signals (will update fact table)
             displayLiabilitySignals(data);
+            showSuccess('Facts extracted and liability signals analyzed successfully.');
         } else {
             showError('No signals received from server.');
         }
     })
     .catch(err => {
-        hideTabLoading('liabilitySignals');
+        hideTabLoading('factMatrix');
         showError('Failed to analyze liability signals. Please try again.');
         console.error('Error:', err);
     });
 }
 
 function displayLiabilitySignals(signalsData) {
-    // Switch to Liability Signals tab
-    switchTab('liability-signals');
+    // Store signals data
+    currentLiabilitySignalsData = signalsData;
     
-    // Render signals table
-    renderLiabilitySignalsTable(signalsData.signals);
+    // Update liability columns with actual data
+    updateLiabilityColumns(signalsData);
+}
+
+function showProcessingInLiabilityColumns() {
+    // Show "Processing..." in all liability columns
+    const allRows = factTableBody.querySelectorAll('tr');
+    allRows.forEach((row, index) => {
+        const signalTypeCell = row.querySelector('.liability-signal-type-cell');
+        const impactCell = row.querySelector('.liability-impact-cell');
+        const severityCell = row.querySelector('.liability-severity-cell');
+        
+        if (signalTypeCell) {
+            signalTypeCell.innerHTML = '<span style="color: #999; font-style: italic;">Processing...</span>';
+        }
+        if (impactCell) {
+            impactCell.innerHTML = '<span style="color: #999; font-style: italic;">Processing...</span>';
+        }
+        if (severityCell) {
+            severityCell.innerHTML = '<span style="color: #999; font-style: italic;">Processing...</span>';
+        }
+    });
+}
+
+function checkIfAllConflictsResolved() {
+    if (!currentFactsData || !currentFactsData.conflicts || currentFactsData.conflicts.length === 0) {
+        // No conflicts, so technically all are resolved
+        return true;
+    }
     
-    // Scroll to top of tab
-    document.getElementById('liabilitySignalsTab').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    // Check if all conflicts have accepted versions
+    // Use String(idx) to ensure consistent key type matching (acceptedVersions keys are stored as strings)
+    return currentFactsData.conflicts.every((c, idx) => 
+        currentFactsData.acceptedVersions && currentFactsData.acceptedVersions[String(idx)]
+    );
+}
+
+function updateLiabilityColumns(signalsData) {
+    if (!currentFactsData || !currentFactsData.facts) {
+        return;
+    }
+    
+    const signals = signalsData.signals || [];
+    const allRows = factTableBody.querySelectorAll('tr');
+    
+    allRows.forEach((row, index) => {
+        const fact = currentFactsData.facts[index];
+        if (!fact) return;
+        
+        // Find matching signal for this fact
+        const signalInfo = getFactSignalInfo(fact, index);
+        
+        // Update Signal Type cell
+        const signalTypeCell = row.querySelector('.liability-signal-type-cell');
+        if (signalTypeCell) {
+            if (signalInfo && signalInfo.signal_type) {
+                const signalType = signalInfo.signal_type || 'unknown';
+                signalTypeCell.innerHTML = `<span class="signal-type-badge signal-type-${signalType.replace(/\s+/g, '-').toLowerCase()}">${escapeHtml(signalType)}</span>`;
+            } else {
+                signalTypeCell.textContent = '—';
+            }
+        }
+        
+        // Update Impact cell
+        const impactCell = row.querySelector('.liability-impact-cell');
+        if (impactCell) {
+            if (signalInfo && signalInfo.impact_on_liability) {
+                impactCell.textContent = signalInfo.impact_on_liability;
+            } else {
+                impactCell.textContent = '—';
+            }
+        }
+        
+        // Update Severity cell
+        const severityCell = row.querySelector('.liability-severity-cell');
+        if (severityCell) {
+            if (signalInfo && signalInfo.severity_score !== undefined) {
+                const severity = signalInfo.severity_score || 0;
+                const severityPercent = Math.round(severity * 100);
+                severityCell.innerHTML = `
+                    <div class="severity-container">
+                        <div class="severity-bar">
+                            <div class="severity-fill" style="width: ${severityPercent}%"></div>
+                        </div>
+                        <span class="severity-text">${severityPercent}%</span>
+                    </div>
+                `;
+            } else {
+                severityCell.textContent = '—';
+            }
+        }
+    });
 }
 
 function renderLiabilitySignalsTable(signals) {
@@ -1441,21 +2239,32 @@ function toggleEvidenceText(index) {
 }
 
 function checkEvidenceCompleteness() {
-    // Check if fact matrix exists
-    if (!currentFactsData || !currentFactsData.facts || currentFactsData.facts.length === 0) {
-        showError('Please extract facts first before checking evidence completeness.');
+    // Check if files are uploaded
+    if (!uploadedFiles || Object.keys(uploadedFiles).length === 0) {
+        // No files uploaded yet, don't check
         return;
     }
     
-    // Switch to Evidence Completeness tab
-    switchTab('evidence-completeness');
+    // Show evidence completeness section in files tab
+    const evidenceSection = document.getElementById('evidenceCompletenessSection');
+    const evidenceLoading = document.getElementById('evidenceCompletenessLoading');
+    const checksSummary = document.getElementById('checksSummarySection');
     
-    // Show loading state in Evidence Completeness tab
-    showTabLoading('evidenceCompleteness', 'Checking evidence completeness...');
+    if (evidenceSection) {
+        evidenceSection.style.display = 'block';
+    }
+    
+    if (evidenceLoading) {
+        evidenceLoading.style.display = 'block';
+    }
+    if (checksSummary) {
+        checksSummary.style.display = 'none';
+    }
+    
     error.style.display = 'none';
     
-    // Prepare facts data to send
-    const factsData = currentFactsData.facts;
+    // Prepare files data to send
+    const filesData = Object.values(uploadedFiles);
     
     // Send to backend
     fetch('/check-evidence-completeness', {
@@ -1463,7 +2272,7 @@ function checkEvidenceCompleteness() {
         headers: {
             'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ facts: factsData })
+        body: JSON.stringify({ files: filesData })
     })
     .then(response => response.json())
     .then(data => {
@@ -1491,36 +2300,29 @@ function checkEvidenceCompleteness() {
 }
 
 function displayEvidenceCompleteness(data) {
-    // Switch to Evidence Completeness tab
-    switchTab('evidence-completeness');
-    
+    // Display in files tab (don't switch tabs)
     const checksSummarySection = document.getElementById('checksSummarySection');
-    const missingEvidenceSection = document.getElementById('missingEvidenceSection');
-    const evidenceEmptyState = document.getElementById('evidenceEmptyState');
     const checksGrid = document.getElementById('checksGrid');
-    const missingEvidenceList = document.getElementById('missingEvidenceList');
-    
-    // Hide empty state
-    evidenceEmptyState.style.display = 'none';
     
     // Display checks summary
     if (data.checks) {
-        checksSummarySection.style.display = 'block';
-        renderChecksSummary(data.checks);
+        if (checksSummarySection) {
+            checksSummarySection.style.display = 'block';
+        }
+        if (checksGrid) {
+            renderChecksSummary(data.checks);
+        }
     } else {
-        checksSummarySection.style.display = 'none';
+        if (checksSummarySection) {
+            checksSummarySection.style.display = 'none';
+        }
     }
     
-    // Display missing evidence checklist
-    if (data.missing_evidence && data.missing_evidence.length > 0) {
-        missingEvidenceSection.style.display = 'block';
-        renderMissingEvidence(data.missing_evidence);
-    } else {
-        missingEvidenceSection.style.display = 'none';
+    // Scroll to evidence completeness section
+    const evidenceSection = document.getElementById('evidenceCompletenessSection');
+    if (evidenceSection) {
+        evidenceSection.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
-    
-    // Scroll to top of tab
-    document.getElementById('evidenceCompletenessTab').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 function renderChecksSummary(checks) {
@@ -1563,45 +2365,59 @@ function renderChecksSummary(checks) {
     });
 }
 
-function renderMissingEvidence(missingEvidence) {
-    const missingEvidenceList = document.getElementById('missingEvidenceList');
-    missingEvidenceList.innerHTML = '';
+function generateLiabilityRecommendationForTab() {
+    // Check if fact matrix exists
+    if (!currentFactsData || !currentFactsData.facts || currentFactsData.facts.length === 0) {
+        showError('Please extract facts first before getting liability recommendation.');
+        return;
+    }
     
-    // Sort by priority (high, medium, low)
-    const priorityOrder = { 'high': 0, 'medium': 1, 'low': 2 };
-    const sortedEvidence = [...missingEvidence].sort((a, b) => {
-        const aPriority = priorityOrder[a.priority?.toLowerCase()] ?? 3;
-        const bPriority = priorityOrder[b.priority?.toLowerCase()] ?? 3;
-        return aPriority - bPriority;
-    });
+    // Check if liability signals exist
+    if (!currentLiabilitySignalsData || !currentLiabilitySignalsData.signals || currentLiabilitySignalsData.signals.length === 0) {
+        showError('Please analyze liability signals first before getting liability recommendation.');
+        return;
+    }
     
-    sortedEvidence.forEach((item, index) => {
-        const evidenceItem = document.createElement('div');
-        evidenceItem.className = 'missing-evidence-item';
+    // Switch to Liability Recommendation tab first
+    switchTab('liability-recommendation');
+    
+    // Show loading state in the tab
+    showTabLoading('liabilityRecommendation', 'Generating liability recommendation...');
+    error.style.display = 'none';
+    
+    // Prepare facts and signals data to send
+    const factsData = currentFactsData.facts;
+    const signalsData = currentLiabilitySignalsData.signals;
+    
+    // Send to backend
+    fetch('/get-liability-recommendation', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ facts: factsData, signals: signalsData })
+    })
+    .then(response => response.json())
+    .then(data => {
+        hideTabLoading('liabilityRecommendation');
         
-        const priorityClass = `priority-${item.priority?.toLowerCase() || 'low'}`;
-        const priorityIcon = item.priority?.toLowerCase() === 'high' ? '🔴' : 
-                           item.priority?.toLowerCase() === 'medium' ? '🟡' : '🟢';
-        
-        evidenceItem.innerHTML = `
-            <div class="missing-evidence-header">
-                <span class="evidence-number">${index + 1}</span>
-                <h4>${escapeHtml(item.evidence_needed || 'Unknown Evidence')}</h4>
-                <span class="priority-badge ${priorityClass}">${priorityIcon} ${item.priority || 'low'}</span>
-            </div>
-            <div class="missing-evidence-content">
-                <div class="why-it-matters">
-                    <strong>Why it matters:</strong>
-                    <p>${escapeHtml(item.why_it_matters || 'Not specified')}</p>
-                </div>
-                <div class="suggested-follow-up">
-                    <strong>Suggested follow-up questions:</strong>
-                    <p>${escapeHtml(item.suggested_follow_up || 'No suggestions provided')}</p>
-                </div>
-            </div>
-        `;
-        
-        missingEvidenceList.appendChild(evidenceItem);
+        if (data.error) {
+            showError(data.error);
+        } else if (data.claimant_liability_percent !== undefined && data.other_driver_liability_percent !== undefined) {
+            // Store recommendation data
+            currentLiabilityRecommendationData = data;
+            updateStepIndicators();
+            updateProgress();
+            // Display liability recommendation (skip tab switch since we're already on the tab)
+            displayLiabilityRecommendation(data, true);
+        } else {
+            showError('No recommendation received from server.');
+        }
+    })
+    .catch(err => {
+        hideTabLoading('liabilityRecommendation');
+        showError('Failed to get liability recommendation. Please try again.');
+        console.error('Error:', err);
     });
 }
 
@@ -1658,9 +2474,11 @@ function getLiabilityRecommendation() {
     });
 }
 
-function displayLiabilityRecommendation(recommendationData) {
-    // Switch to Liability Recommendation tab
-    switchTab('liability-recommendation');
+function displayLiabilityRecommendation(recommendationData, skipTabSwitch = false) {
+    // Switch to Liability Recommendation tab only if not skipping
+    if (!skipTabSwitch) {
+        switchTab('liability-recommendation');
+    }
     
     // Hide empty state, show form
     const emptyState = document.getElementById('recommendationEmptyState');
@@ -1817,23 +2635,9 @@ function generateTimeline() {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ facts: factsData, signals: signalsData })
-        }).then(r => r.json()),
-        
-        // Claim Rationale
-        fetch('/generate-claim-rationale', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ facts: factsData, signals: signalsData, files: filesData })
-        }).then(r => r.json()),
-        
-        // Escalation Package
-        fetch('/generate-escalation-package', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ facts: factsData, signals: signalsData })
         }).then(r => r.json())
     ])
-    .then(([timelineData, recommendationData, rationaleData, escalationData]) => {
+    .then(([timelineData, recommendationData]) => {
         hideTabLoading('timeline');
         
         // Handle timeline
@@ -1853,27 +2657,7 @@ function generateTimeline() {
             currentLiabilityRecommendationData = recommendationData;
             updateStepIndicators();
             updateProgress();
-            displayLiabilityRecommendation(recommendationData);
-        }
-        
-        // Handle claim rationale
-        if (rationaleData.error) {
-            console.error('Claim rationale failed:', rationaleData.error);
-        } else if (rationaleData.rationale) {
-            currentClaimRationaleData = rationaleData;
-            updateStepIndicators();
-            updateProgress();
-            displayClaimRationale(rationaleData.rationale);
-        }
-        
-        // Handle escalation package
-        if (escalationData.error) {
-            console.error('Escalation package failed:', escalationData.error);
-        } else if (escalationData.escalation_package) {
-            currentEscalationPackageData = escalationData;
-            updateStepIndicators();
-            updateProgress();
-            displayEscalationPackage(escalationData.escalation_package);
+            // Don't display or switch tabs - wait for user to navigate to liability recommendation tab
         }
         
         showSuccess('Timeline and recommendations generated successfully!');
@@ -1886,8 +2670,8 @@ function generateTimeline() {
 }
 
 function displayTimeline(timelineData) {
-    // Switch to Timeline tab
-    switchTab('timeline');
+    // Switch to Timeline tab, but skip loading from localStorage since we're displaying a newly generated timeline
+    switchTab('timeline', true);
     
     // Hide empty state, show timeline container
     const emptyState = document.getElementById('timelineEmptyState');
@@ -2071,6 +2855,13 @@ function saveTimeline() {
 
 function loadTimeline() {
     try {
+        // First check if timeline exists in memory
+        if (currentTimelineData && currentTimelineData.timeline) {
+            displayTimeline(currentTimelineData);
+            return;
+        }
+        
+        // Then check localStorage
         const savedTimeline = localStorage.getItem('timeline_reconstruction');
         if (savedTimeline) {
             const timelineData = JSON.parse(savedTimeline);
@@ -2078,10 +2869,26 @@ function loadTimeline() {
             updateStepIndicators();
             updateProgress();
             displayTimeline(timelineData);
+        } else {
+            // No timeline exists - show empty state
+            showTimelineEmptyState();
         }
     } catch (err) {
         console.error('Error loading timeline:', err);
+        showTimelineEmptyState();
     }
+}
+
+function showTimelineEmptyState() {
+    const emptyState = document.getElementById('timelineEmptyState');
+    const timelineContainer = document.getElementById('timelineEventsContainer');
+    const saveButton = document.getElementById('saveTimelineButton');
+    const loadingDiv = document.getElementById('timelineLoading');
+    
+    if (loadingDiv) loadingDiv.style.display = 'none';
+    if (timelineContainer) timelineContainer.style.display = 'none';
+    if (saveButton) saveButton.style.display = 'none';
+    if (emptyState) emptyState.style.display = 'block';
 }
 
 function generateClaimRationale() {
@@ -2148,6 +2955,17 @@ function displayClaimRationale(rationale) {
     
     if (emptyState) emptyState.style.display = 'none';
     if (display) display.style.display = 'block';
+    
+    // Show action buttons
+    const editButton = document.getElementById('editRationaleButton');
+    const supervisorButton = document.getElementById('supervisorEscalationButton');
+    const downloadButton = document.getElementById('downloadRationaleButton');
+    if (editButton) editButton.style.display = 'inline-block';
+    if (supervisorButton) supervisorButton.style.display = 'inline-block';
+    if (downloadButton) downloadButton.style.display = 'inline-block';
+    
+    // Update supervisor button state
+    updateSupervisorEscalationButton();
     
     // Render rationale
     renderClaimRationale(rationale);
@@ -2276,22 +3094,318 @@ function renderClaimRationale(rationale) {
     display.innerHTML = html;
 }
 
-function generateEscalationPackage() {
+let isEditMode = false;
+let originalRationaleData = null;
+
+function toggleEditRationale() {
+    if (!currentClaimRationaleData || !currentClaimRationaleData.rationale) {
+        showError('No claim rationale available to edit.');
+        return;
+    }
+    
+    isEditMode = true;
+    originalRationaleData = JSON.parse(JSON.stringify(currentClaimRationaleData.rationale));
+    
+    // Hide display, show edit form
+    const display = document.getElementById('rationaleDisplay');
+    const editForm = document.getElementById('rationaleEdit');
+    const editButton = document.getElementById('editRationaleButton');
+    const saveButton = document.getElementById('saveRationaleButton');
+    const cancelButton = document.getElementById('cancelEditRationaleButton');
+    const downloadButton = document.getElementById('downloadRationaleButton');
+    const supervisorButton = document.getElementById('supervisorEscalationButton');
+    
+    if (display) display.style.display = 'none';
+    if (editForm) {
+        editForm.style.display = 'block';
+        renderEditableRationale(currentClaimRationaleData.rationale);
+    }
+    if (editButton) editButton.style.display = 'none';
+    if (saveButton) saveButton.style.display = 'inline-block';
+    if (cancelButton) cancelButton.style.display = 'inline-block';
+    if (downloadButton) downloadButton.style.display = 'none';
+    if (supervisorButton) supervisorButton.style.display = 'none';
+}
+
+function cancelEditRationale() {
+    isEditMode = false;
+    
+    // Restore original data
+    if (originalRationaleData && currentClaimRationaleData) {
+        currentClaimRationaleData.rationale = JSON.parse(JSON.stringify(originalRationaleData));
+    }
+    
+    // Hide edit form, show display
+    const display = document.getElementById('rationaleDisplay');
+    const editForm = document.getElementById('rationaleEdit');
+    const editButton = document.getElementById('editRationaleButton');
+    const saveButton = document.getElementById('saveRationaleButton');
+    const cancelButton = document.getElementById('cancelEditRationaleButton');
+    const downloadButton = document.getElementById('downloadRationaleButton');
+    const supervisorButton = document.getElementById('supervisorEscalationButton');
+    
+    if (editForm) editForm.style.display = 'none';
+    if (display) {
+        display.style.display = 'block';
+        renderClaimRationale(currentClaimRationaleData.rationale);
+    }
+    if (editButton) editButton.style.display = 'inline-block';
+    if (saveButton) saveButton.style.display = 'none';
+    if (cancelButton) cancelButton.style.display = 'none';
+    if (downloadButton) downloadButton.style.display = 'inline-block';
+    if (supervisorButton) supervisorButton.style.display = 'inline-block';
+    
+    originalRationaleData = null;
+}
+
+function renderEditableRationale(rationale) {
+    const editForm = document.getElementById('rationaleEdit');
+    if (!editForm) return;
+    
+    let html = '<div class="rationale-edit-form">';
+    
+    // Incident Summary
+    html += `
+        <div class="rationale-edit-section">
+            <label for="edit-incident-summary"><strong>Incident Summary</strong></label>
+            <textarea id="edit-incident-summary" class="rationale-textarea" rows="5">${escapeHtml(rationale.incident_summary || '')}</textarea>
+        </div>
+    `;
+    
+    // Evidence Overview
+    html += `
+        <div class="rationale-edit-section">
+            <label><strong>Evidence Overview</strong></label>
+            <div class="evidence-edit-subsection">
+                <label for="edit-evidence-narratives">Narratives:</label>
+                <textarea id="edit-evidence-narratives" class="rationale-textarea" rows="4">${escapeHtml(rationale.evidence_overview?.narratives || '')}</textarea>
+            </div>
+            <div class="evidence-edit-subsection">
+                <label for="edit-evidence-photos">Photos:</label>
+                <textarea id="edit-evidence-photos" class="rationale-textarea" rows="4">${escapeHtml(rationale.evidence_overview?.photos || '')}</textarea>
+            </div>
+            ${rationale.images && rationale.images.length > 0 ? `
+                <div class="evidence-edit-subsection">
+                    <strong>Uploaded Images:</strong>
+                    <div class="rationale-images-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 15px; margin-top: 15px;">
+                        ${rationale.images.map((img, imgIndex) => {
+                            const sourceLabel = img.type === 'pdf_image' 
+                                ? `${escapeHtml(img.source)} - Page ${img.page}`
+                                : escapeHtml(img.source);
+                            return `
+                                <div class="rationale-image-item" style="border: 1px solid #ddd; border-radius: 5px; padding: 10px; background: #f9f9f9;">
+                                    <img src="${img.data}" alt="Evidence image ${imgIndex + 1}" 
+                                         style="width: 100%; height: auto; border-radius: 3px; cursor: pointer;"
+                                         onclick="window.open('${img.data}', '_blank')"
+                                         onerror="this.style.display='none'">
+                                    <div style="margin-top: 8px; font-size: 12px; color: #666; text-align: center;">
+                                        ${sourceLabel}
+                                    </div>
+                                </div>
+                            `;
+                        }).join('')}
+                    </div>
+                </div>
+            ` : ''}
+        </div>
+    `;
+    
+    // Liability Assessment Logic
+    html += `
+        <div class="rationale-edit-section">
+            <label for="edit-liability-logic"><strong>Liability Assessment Logic</strong></label>
+            <textarea id="edit-liability-logic" class="rationale-textarea" rows="8">${escapeHtml(rationale.liability_assessment_logic || '')}</textarea>
+        </div>
+    `;
+    
+    // Key Evidence
+    html += `
+        <div class="rationale-edit-section">
+            <label for="edit-key-evidence"><strong>Key Evidence Supporting Assessment</strong></label>
+            <textarea id="edit-key-evidence" class="rationale-textarea" rows="6" placeholder="Enter each evidence item on a new line">${rationale.key_evidence ? rationale.key_evidence.map(item => escapeHtml(item)).join('\n') : ''}</textarea>
+        </div>
+    `;
+    
+    // Open Questions
+    html += `
+        <div class="rationale-edit-section">
+            <label for="edit-open-questions"><strong>Open Questions / Follow-Up</strong></label>
+            <textarea id="edit-open-questions" class="rationale-textarea" rows="6" placeholder="Enter each question on a new line">${rationale.open_questions ? rationale.open_questions.map(item => escapeHtml(item)).join('\n') : ''}</textarea>
+        </div>
+    `;
+    
+    // Coverage Considerations
+    html += `
+        <div class="rationale-edit-section">
+            <label for="edit-coverage"><strong>Coverage Considerations</strong></label>
+            <textarea id="edit-coverage" class="rationale-textarea" rows="6">${escapeHtml(rationale.coverage_considerations || '')}</textarea>
+        </div>
+    `;
+    
+    // Recommendation
+    html += `
+        <div class="rationale-edit-section">
+            <label for="edit-recommendation"><strong>Recommendation</strong></label>
+            <textarea id="edit-recommendation" class="rationale-textarea" rows="6">${escapeHtml(rationale.recommendation || '')}</textarea>
+        </div>
+    `;
+    
+    html += '</div>';
+    editForm.innerHTML = html;
+}
+
+function saveEditedRationale() {
+    if (!currentClaimRationaleData || !currentClaimRationaleData.rationale) {
+        showError('No claim rationale available to save.');
+        return;
+    }
+    
+    // Collect edited values
+    const editedRationale = {
+        incident_summary: document.getElementById('edit-incident-summary')?.value || '',
+        evidence_overview: {
+            narratives: document.getElementById('edit-evidence-narratives')?.value || '',
+            photos: document.getElementById('edit-evidence-photos')?.value || ''
+        },
+        liability_assessment_logic: document.getElementById('edit-liability-logic')?.value || '',
+        key_evidence: document.getElementById('edit-key-evidence')?.value.split('\n').filter(line => line.trim()).map(line => line.trim()) || [],
+        open_questions: document.getElementById('edit-open-questions')?.value.split('\n').filter(line => line.trim()).map(line => line.trim()) || [],
+        coverage_considerations: document.getElementById('edit-coverage')?.value || '',
+        recommendation: document.getElementById('edit-recommendation')?.value || ''
+    };
+    
+    // Preserve images if they exist
+    if (currentClaimRationaleData.rationale.images) {
+        editedRationale.images = currentClaimRationaleData.rationale.images;
+    }
+    
+    // Show loading state
+    const saveButton = document.getElementById('saveRationaleButton');
+    if (saveButton) {
+        saveButton.disabled = true;
+        saveButton.textContent = 'Saving...';
+    }
+    
+    // Send to backend to save
+    fetch('/save-claim-rationale', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ rationale: editedRationale })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            // Update current data
+            currentClaimRationaleData.rationale = editedRationale;
+            
+            // Exit edit mode
+            isEditMode = false;
+            originalRationaleData = null;
+            
+            // Hide edit form, show display
+            const display = document.getElementById('rationaleDisplay');
+            const editForm = document.getElementById('rationaleEdit');
+            const editButton = document.getElementById('editRationaleButton');
+            const saveButton = document.getElementById('saveRationaleButton');
+            const cancelButton = document.getElementById('cancelEditRationaleButton');
+            const downloadButton = document.getElementById('downloadRationaleButton');
+            const supervisorButton = document.getElementById('supervisorEscalationButton');
+            
+            if (editForm) editForm.style.display = 'none';
+            if (display) {
+                display.style.display = 'block';
+                renderClaimRationale(editedRationale);
+            }
+            if (editButton) editButton.style.display = 'inline-block';
+            if (saveButton) {
+                saveButton.style.display = 'none';
+                saveButton.disabled = false;
+                saveButton.textContent = 'Save';
+            }
+            if (cancelButton) cancelButton.style.display = 'none';
+            if (downloadButton) downloadButton.style.display = 'inline-block';
+            if (supervisorButton) supervisorButton.style.display = 'inline-block';
+            
+            showSuccessToast('Rationale saved successfully.');
+        } else {
+            throw new Error(data.error || 'Failed to save rationale');
+        }
+    })
+    .catch(err => {
+        showError(err.message || 'Failed to save rationale. Please try again.');
+        console.error('Save Rationale Error:', err);
+        if (saveButton) {
+            saveButton.disabled = false;
+            saveButton.textContent = 'Save';
+        }
+    });
+}
+
+function updateSupervisorEscalationButton() {
+    const supervisorButton = document.getElementById('supervisorEscalationButton');
+    if (!supervisorButton) return;
+    
+    if (isEscalatedToSupervisor) {
+        supervisorButton.disabled = true;
+        supervisorButton.textContent = 'Escalated to Supervisor';
+        supervisorButton.style.opacity = '0.6';
+        supervisorButton.style.cursor = 'not-allowed';
+    } else {
+        supervisorButton.disabled = false;
+        supervisorButton.textContent = 'Supervisor Escalation';
+        supervisorButton.style.opacity = '1';
+        supervisorButton.style.cursor = 'pointer';
+    }
+}
+
+function openSupervisorEscalationModal() {
+    if (isEscalatedToSupervisor) {
+        return; // Don't open if already escalated
+    }
+    
+    const modal = document.getElementById('supervisorEscalationModal');
+    const modalBody = document.getElementById('supervisorEscalationModalBody');
+    const modalContent = document.getElementById('escalationModalContent');
+    const modalLoading = document.getElementById('escalationModalLoading');
+    const modalActions = document.getElementById('supervisorEscalationModalActions');
+    
+    if (!modal || !modalBody) {
+        showError('Modal elements not found.');
+        return;
+    }
+    
+    // Show modal
+    modal.style.display = 'block';
+    modalLoading.style.display = 'block';
+    modalContent.style.display = 'none';
+    modalActions.style.display = 'none';
+    
+    // Check if we already have escalation package data
+    if (currentEscalationPackageData && currentEscalationPackageData.escalation_package) {
+        // Use existing data
+        displayEscalationPackageInModal(currentEscalationPackageData.escalation_package);
+    } else {
+        // Generate new escalation package
+        generateEscalationPackageForModal();
+    }
+}
+
+function generateEscalationPackageForModal() {
     // Check if fact matrix exists
     if (!currentFactsData || !currentFactsData.facts || currentFactsData.facts.length === 0) {
         showError('Please extract facts first before generating escalation package.');
+        closeSupervisorEscalationModal();
         return;
     }
     
     // Check if liability signals exist
     if (!currentLiabilitySignalsData || !currentLiabilitySignalsData.signals || currentLiabilitySignalsData.signals.length === 0) {
         showError('Please analyze liability signals first before generating escalation package.');
+        closeSupervisorEscalationModal();
         return;
     }
-    
-    // Show loading state
-    loading.style.display = 'block';
-    error.style.display = 'none';
     
     // Prepare facts and signals data to send
     const factsData = currentFactsData.facts;
@@ -2307,63 +3421,56 @@ function generateEscalationPackage() {
     })
     .then(response => response.json())
     .then(data => {
-        loading.style.display = 'none';
+        const modalLoading = document.getElementById('escalationModalLoading');
+        if (modalLoading) modalLoading.style.display = 'none';
         
         if (data.error) {
             showError(data.error);
+            closeSupervisorEscalationModal();
         } else if (data.escalation_package) {
             // Store escalation package data
             currentEscalationPackageData = data;
-            updateStepIndicators();
-            updateProgress();
-            // Display escalation package
-            displayEscalationPackage(data.escalation_package);
+            // Display in modal
+            displayEscalationPackageInModal(data.escalation_package);
         } else {
             showError('No escalation package received from server.');
+            closeSupervisorEscalationModal();
         }
     })
     .catch(err => {
-        loading.style.display = 'none';
+        const modalLoading = document.getElementById('escalationModalLoading');
+        if (modalLoading) modalLoading.style.display = 'none';
         showError('Failed to generate escalation package. Please try again.');
         console.error('Error:', err);
+        closeSupervisorEscalationModal();
     });
 }
 
-function displayEscalationPackage(escalationPackage) {
-    // Switch to Escalation Package tab
-    switchTab('escalation-package');
+function displayEscalationPackageInModal(escalationPackage) {
+    const modalContent = document.getElementById('escalationModalContent');
+    const modalActions = document.getElementById('supervisorEscalationModalActions');
+    const modalLoading = document.getElementById('escalationModalLoading');
     
-    // Hide empty state, show display
-    const emptyState = document.getElementById('escalationEmptyState');
-    const display = document.getElementById('escalationDisplay');
+    if (!modalContent) return;
     
-    if (emptyState) emptyState.style.display = 'none';
-    if (display) display.style.display = 'block';
+    if (modalLoading) modalLoading.style.display = 'none';
+    modalContent.style.display = 'block';
+    if (modalActions) modalActions.style.display = 'flex';
     
-    // Render escalation package
-    renderEscalationPackage(escalationPackage);
+    // Render escalation package with editable fields
+    let html = '<div class="escalation-sections" style="max-height: 60vh; overflow-y: auto;">';
     
-    // Scroll to top of tab
-    document.getElementById('escalationPackageTab').scrollIntoView({ behavior: 'smooth', block: 'start' });
-}
-
-function renderEscalationPackage(escalationPackage) {
-    const display = document.getElementById('escalationDisplay');
-    if (!display) return;
-    
-    let html = '<div class="escalation-sections">';
-    
-    // Executive Summary
+    // Executive Summary (editable)
     if (escalationPackage.executive_summary) {
         html += `
             <div class="escalation-section executive-summary-section">
                 <h3>Executive Summary</h3>
-                <div class="escalation-content">${escapeHtml(escalationPackage.executive_summary).replace(/\n/g, '<br>')}</div>
+                <textarea id="escalationExecutiveSummary" class="escalation-editable" rows="6" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-family: inherit; font-size: 14px;">${escapeHtml(escalationPackage.executive_summary)}</textarea>
             </div>
         `;
     }
     
-    // Top 5 Risks
+    // Top 5 Risks (editable)
     if (escalationPackage.top_5_risks && escalationPackage.top_5_risks.length > 0) {
         html += `
             <div class="escalation-section">
@@ -2373,17 +3480,19 @@ function renderEscalationPackage(escalationPackage) {
                         const severityClass = `risk-severity-${risk.severity || 'medium'}`;
                         const severityIcon = risk.severity === 'high' ? '🔴' : risk.severity === 'medium' ? '🟡' : '🟢';
                         return `
-                            <div class="risk-item">
-                                <div class="risk-header">
-                                    <span class="risk-number">${index + 1}</span>
+                            <div class="risk-item" style="margin-bottom: 15px; padding: 15px; border: 1px solid #ddd; border-radius: 4px;">
+                                <div class="risk-header" style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
+                                    <span class="risk-number" style="font-weight: bold;">${index + 1}.</span>
                                     <span class="risk-severity ${severityClass}">${severityIcon} ${(risk.severity || 'medium').toUpperCase()}</span>
                                 </div>
-                                <div class="risk-content">
-                                    <strong>Risk:</strong> ${escapeHtml(risk.risk || 'N/A')}
+                                <div class="risk-content" style="margin-bottom: 10px;">
+                                    <strong>Risk:</strong>
+                                    <textarea id="escalationRisk_${index}" class="escalation-editable" rows="2" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-family: inherit; font-size: 14px; margin-top: 5px;">${escapeHtml(risk.risk || 'N/A')}</textarea>
                                 </div>
                                 ${risk.impact ? `
                                     <div class="risk-impact">
-                                        <strong>Impact:</strong> ${escapeHtml(risk.impact)}
+                                        <strong>Impact:</strong>
+                                        <textarea id="escalationImpact_${index}" class="escalation-editable" rows="2" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-family: inherit; font-size: 14px; margin-top: 5px;">${escapeHtml(risk.impact)}</textarea>
                                     </div>
                                 ` : ''}
                             </div>
@@ -2394,37 +3503,390 @@ function renderEscalationPackage(escalationPackage) {
         `;
     }
     
-    // Needed Supervisor Decisions
+    // Needed Supervisor Decisions (editable)
     if (escalationPackage.needed_supervisor_decisions && escalationPackage.needed_supervisor_decisions.length > 0) {
         html += `
             <div class="escalation-section">
                 <h3>Needed Supervisor Decisions</h3>
-                <ul class="escalation-list">
-                    ${escalationPackage.needed_supervisor_decisions.map(item => `<li>${escapeHtml(item)}</li>`).join('')}
-                </ul>
+                <div id="escalationDecisionsList">
+                    ${escalationPackage.needed_supervisor_decisions.map((item, index) => `
+                        <div style="margin-bottom: 10px;">
+                            <textarea id="escalationDecision_${index}" class="escalation-editable" rows="2" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-family: inherit; font-size: 14px;">${escapeHtml(item)}</textarea>
+                        </div>
+                    `).join('')}
+                </div>
             </div>
         `;
     }
     
-    // Recommended Adjuster Actions
+    // Recommended Adjuster Actions (editable)
     if (escalationPackage.recommended_adjuster_actions && escalationPackage.recommended_adjuster_actions.length > 0) {
         html += `
             <div class="escalation-section">
                 <h3>Recommended Adjuster Actions</h3>
-                <ul class="escalation-list">
-                    ${escalationPackage.recommended_adjuster_actions.map(item => `<li>${escapeHtml(item)}</li>`).join('')}
-                </ul>
+                <div id="escalationActionsList">
+                    ${escalationPackage.recommended_adjuster_actions.map((item, index) => `
+                        <div style="margin-bottom: 10px;">
+                            <textarea id="escalationAction_${index}" class="escalation-editable" rows="2" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-family: inherit; font-size: 14px;">${escapeHtml(item)}</textarea>
+                        </div>
+                    `).join('')}
+                </div>
             </div>
         `;
     }
     
     html += '</div>';
-    display.innerHTML = html;
+    modalContent.innerHTML = html;
+}
+
+function closeSupervisorEscalationModal() {
+    const modal = document.getElementById('supervisorEscalationModal');
+    if (modal) {
+        modal.style.display = 'none';
+    }
+}
+
+function sendToSupervisor() {
+    // Show success toast
+    showSuccessToast('Sent');
+    
+    // Close modal
+    closeSupervisorEscalationModal();
+    
+    // Mark as escalated and update button
+    isEscalatedToSupervisor = true;
+    updateSupervisorEscalationButton();
+}
+
+function showSuccessToast(message) {
+    // Create toast element
+    const toast = document.createElement('div');
+    toast.className = 'success-toast';
+    toast.textContent = message;
+    toast.style.cssText = `
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        background: #4caf50;
+        color: white;
+        padding: 15px 25px;
+        border-radius: 4px;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        z-index: 10000;
+        font-size: 14px;
+        font-weight: 500;
+        animation: slideIn 0.3s ease-out;
+    `;
+    
+    // Add animation
+    const style = document.createElement('style');
+    style.textContent = `
+        @keyframes slideIn {
+            from {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+    `;
+    if (!document.getElementById('toast-animation-style')) {
+        style.id = 'toast-animation-style';
+        document.head.appendChild(style);
+    }
+    
+    document.body.appendChild(toast);
+    
+    // Remove after 3 seconds
+    setTimeout(() => {
+        toast.style.animation = 'slideIn 0.3s ease-out reverse';
+        setTimeout(() => {
+            toast.remove();
+        }, 300);
+    }, 3000);
+}
+
+function downloadClaimRationalePDF() {
+    if (!currentClaimRationaleData || !currentClaimRationaleData.rationale) {
+        showError('No claim rationale available to download.');
+        return;
+    }
+    
+    console.log('Downloading PDF with rationale data:', currentClaimRationaleData.rationale);
+    
+    // Send request to backend to generate PDF
+    fetch('/download-claim-rationale-pdf', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ rationale: currentClaimRationaleData.rationale })
+    })
+    .then(response => {
+        // Check if response is OK
+        if (!response.ok) {
+            // Try to parse error message from response
+            return response.json().then(errorData => {
+                throw new Error(errorData.error || 'Failed to generate PDF. Please try again.');
+            }).catch(() => {
+                // If JSON parsing fails, throw generic error
+                const genericMessage = response.status >= 500
+                    ? 'PDF service is currently unavailable. Please try again later or contact support.'
+                    : `Failed to generate PDF: ${response.status} ${response.statusText}`;
+                throw new Error(genericMessage);
+            });
+        }
+        // Check if response is actually a PDF
+        const contentType = response.headers.get('content-type');
+        if (contentType && contentType.includes('application/pdf')) {
+            return response.blob();
+        } else {
+            // If not PDF, try to parse as JSON error
+            return response.json().then(errorData => {
+                throw new Error(errorData.error || 'Server did not return a PDF');
+            });
+        }
+    })
+    .then(blob => {
+        // Verify blob is not empty
+        if (!blob || blob.size === 0) {
+            throw new Error('Received empty PDF file');
+        }
+        
+        // Create download link
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'claim_rationale.pdf';
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+    })
+    .catch(err => {
+        showError(err.message || 'Failed to download PDF. Please try again.');
+        console.error('PDF Download Error:', err);
+    });
+}
+
+function triggerBulkUpload() {
+    bulkFileInput.click();
+}
+
+function handleBulkUpload(files) {
+    if (files.length === 0) {
+        showError('No files selected.');
+        return;
+    }
+    
+    // Show bulk upload progress
+    const progressContainer = document.getElementById('bulkUploadProgress');
+    const statusDiv = document.getElementById('bulkUploadStatus');
+    progressContainer.style.display = 'block';
+    
+    // Create per-file loading indicators
+    const fileStatusMap = {};
+    files.forEach((file, index) => {
+        fileStatusMap[file.name] = {
+            status: 'uploading',
+            element: null
+        };
+    });
+    
+    // Update status display with per-file indicators
+    const updateStatusDisplay = () => {
+        const statusMessages = [];
+        files.forEach((file, index) => {
+            const fileStatus = fileStatusMap[file.name];
+            if (fileStatus) {
+                if (fileStatus.status === 'uploading') {
+                    statusMessages.push(`<div style="display: flex; align-items: center; gap: 8px;"><span class="spinner inline"></span> ${escapeHtml(file.name)} - Uploading...</div>`);
+                } else if (fileStatus.status === 'matching') {
+                    statusMessages.push(`<div style="display: flex; align-items: center; gap: 8px;"><span class="spinner inline"></span> ${escapeHtml(file.name)} - Matching document type...</div>`);
+                } else if (fileStatus.status === 'complete') {
+                    statusMessages.push(fileStatus.element || `<div>✓ ${escapeHtml(file.name)}</div>`);
+                } else if (fileStatus.status === 'error') {
+                    statusMessages.push(fileStatus.element || `<div style="color: red;">❌ ${escapeHtml(file.name)}</div>`);
+                }
+            }
+        });
+        statusDiv.innerHTML = `<p>Processing ${files.length} file(s)...</p><div style="max-height: 300px; overflow-y: auto; margin-top: 10px;">${statusMessages.join('')}</div>`;
+    };
+    
+    statusDiv.innerHTML = `<p>Uploading ${files.length} file(s)...</p>`;
+    updateStatusDisplay();
+    
+    // Create FormData with all files
+    const formData = new FormData();
+    files.forEach((file, index) => {
+        formData.append('files', file);
+    });
+    
+    // Show loading state
+    loading.style.display = 'block';
+    error.style.display = 'none';
+    
+    // Send to backend
+    fetch('/upload-multiple', {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => response.json())
+    .then(data => {
+        loading.style.display = 'none';
+        
+        if (data.error) {
+            showError(data.error);
+            statusDiv.innerHTML = `<p style="color: red;">Upload failed: ${data.error}</p>`;
+        } else if (data.results && Array.isArray(data.results)) {
+            // Process results
+            let successCount = 0;
+            let errorCount = 0;
+            const statusMessages = [];
+            
+            data.results.forEach((result, index) => {
+                const fileName = result.filename || files[index]?.name || `File ${index + 1}`;
+                const fileStatus = fileStatusMap[fileName] || {};
+                
+                if (result.error) {
+                    errorCount++;
+                    fileStatus.status = 'error';
+                    fileStatus.element = `<div style="color: red;">❌ ${escapeHtml(fileName)}: ${escapeHtml(result.error)}</div>`;
+                    statusMessages.push(fileStatus.element);
+                } else {
+                    successCount++;
+                    fileStatus.status = 'complete';
+                    
+                    // Find matching expected file based on detected type or filename
+                    const detectedType = result.detected_source || 'unknown';
+                    const isRelevant = result.is_relevant || false;
+                    const expectedFile = findExpectedFileForType(detectedType, result.filename);
+                    
+                    if (expectedFile) {
+                        // Store uploaded file data
+                        result.expectedFileName = expectedFile.name;
+                        result.originalFilename = result.filename;
+                        uploadedFiles[expectedFile.name] = result;
+                        fileStatus.element = `<div style="color: green;">✓ ${escapeHtml(fileName)} → ${escapeHtml(expectedFile.displayName)} (${detectedType})</div>`;
+                        statusMessages.push(fileStatus.element);
+                    } else if (isRelevant) {
+                        // Store in miscellaneous if relevant but unmatched
+                        const key = `misc_${result.filename || `file_${index}`}`;
+                        result.expectedFileName = key;
+                        result.originalFilename = result.filename;
+                        result.is_miscellaneous = true;
+                        uploadedFiles[key] = result;
+                        fileStatus.element = `<div style="color: orange;">⚠ ${escapeHtml(fileName)} → Miscellaneous (${detectedType})</div>`;
+                        statusMessages.push(fileStatus.element);
+                    } else {
+                        // Store with original filename if no match found and not relevant
+                        const key = result.filename || `file_${index}`;
+                        result.expectedFileName = key;
+                        result.originalFilename = result.filename;
+                        uploadedFiles[key] = result;
+                        fileStatus.element = `<div style="color: orange;">⚠ ${escapeHtml(fileName)} → No match found (${detectedType})</div>`;
+                        statusMessages.push(fileStatus.element);
+                    }
+                }
+            });
+            
+            // Re-render file list (this will also update button visibility)
+            renderFileList();
+            updateStepIndicators();
+            updateProgress();
+            updateNavigationButtons(); // Update next button state
+            
+            // Show success message
+            if (successCount > 0) {
+                showSuccess(`Successfully uploaded ${successCount} file(s)!`);
+            }
+            
+            // Hide progress immediately
+            progressContainer.style.display = 'none';
+            
+            // Automatically check evidence completeness after files are uploaded
+            if (successCount > 0) {
+                setTimeout(() => {
+                    checkEvidenceCompleteness();
+                }, 500);
+            }
+        } else {
+            showError('Invalid response from server.');
+            statusDiv.innerHTML = `<p style="color: red;">Invalid response from server.</p>`;
+        }
+    })
+    .catch(err => {
+        loading.style.display = 'none';
+        showError(`Failed to upload files. Please try again.`);
+        console.error('Error:', err);
+        statusDiv.innerHTML = `<p style="color: red;">Upload failed: ${err.message}</p>`;
+    });
+}
+
+function findExpectedFileForType(detectedType, filename) {
+    // Map detected types to expected file names
+    const typeMapping = {
+        'fnol': 'fnol.pdf',
+        'claimant': 'claimant_statement.pdf',
+        'other_driver': 'other_driver_statement.pdf',
+        'police': 'police_report.pdf',
+        'repair_estimate': 'repair_estimate.pdf',
+        'policy': 'policy_document.pdf'
+    };
+    
+    // First try to match by detected type
+    if (detectedType && detectedType !== 'unknown' && typeMapping[detectedType]) {
+        const expectedFileName = typeMapping[detectedType];
+        const expectedFile = expectedFiles.find(f => f.name === expectedFileName);
+        if (expectedFile && !uploadedFiles[expectedFileName]) {
+            return expectedFile;
+        }
+    }
+    
+    // If no match by type, try to match by filename keywords
+    const filenameLower = (filename || '').toLowerCase();
+    for (const expectedFile of expectedFiles) {
+        if (uploadedFiles[expectedFile.name]) {
+            continue; // Already uploaded
+        }
+        
+        const expectedNameLower = expectedFile.name.toLowerCase();
+        const displayNameLower = expectedFile.displayName.toLowerCase();
+        
+        // Check if filename contains keywords from expected file
+        if (filenameLower.includes('fnol') && expectedNameLower.includes('fnol')) {
+            return expectedFile;
+        }
+        if ((filenameLower.includes('claimant') || filenameLower.includes('claimant')) && expectedNameLower.includes('claimant')) {
+            return expectedFile;
+        }
+        if ((filenameLower.includes('other') && filenameLower.includes('driver')) && expectedNameLower.includes('other_driver')) {
+            return expectedFile;
+        }
+        if (filenameLower.includes('police') && expectedNameLower.includes('police')) {
+            return expectedFile;
+        }
+        if ((filenameLower.includes('repair') || filenameLower.includes('estimate')) && expectedNameLower.includes('repair')) {
+            return expectedFile;
+        }
+        if (filenameLower.includes('policy') && expectedNameLower.includes('policy')) {
+            return expectedFile;
+        }
+        if (filenameLower.includes('accident') && filenameLower.includes('image')) {
+            return expectedFiles.find(f => f.name === 'accident_images.png');
+        }
+    }
+    
+    return null;
 }
 
 // Make functions globally accessible
 window.triggerFileUpload = triggerFileUpload;
+window.triggerBulkUpload = triggerBulkUpload;
 window.viewFile = viewFile;
+window.viewUnmatchedFile = viewUnmatchedFile;
 window.extractFacts = extractFacts;
 window.filterFacts = filterFacts;
 window.toggleSourceText = toggleSourceText;
@@ -2443,5 +3905,9 @@ window.toggleSupportingFacts = toggleSupportingFacts;
 window.saveTimeline = saveTimeline;
 window.scrollToFact = scrollToFact;
 window.generateClaimRationale = generateClaimRationale;
-window.generateEscalationPackage = generateEscalationPackage;
+window.openSupervisorEscalationModal = openSupervisorEscalationModal;
+window.closeSupervisorEscalationModal = closeSupervisorEscalationModal;
+window.sendToSupervisor = sendToSupervisor;
+window.downloadClaimRationalePDF = downloadClaimRationalePDF;
 window.acceptConflictVersion = acceptConflictVersion;
+

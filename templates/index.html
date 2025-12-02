@@ -4,6 +4,20 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>File Content Extractor</title>
+    <!-- Modular CSS files -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/layout.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/components/buttons.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/components/modals.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/components/tables.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/components/forms.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/views/files.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/views/fact-matrix.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/views/timeline.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/views/liability.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/views/rationale.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/utilities.css') }}">
+    <!-- Legacy style.css - will be removed after testing -->
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
@@ -18,14 +32,12 @@
             <div class="step-progress-container">
                 <!-- Segmented Progress Bar - ABOVE step indicators -->
                 <div class="segmented-progress-bar" id="segmentedProgressBar">
-                    <div class="progress-segment" data-step-index="0"></div>
-                    <div class="progress-segment" data-step-index="1"></div>
-                    <div class="progress-segment" data-step-index="2"></div>
-                    <div class="progress-segment" data-step-index="3"></div>
-                    <div class="progress-segment" data-step-index="4"></div>
-                    <div class="progress-segment" data-step-index="5"></div>
-                    <div class="progress-segment" data-step-index="6"></div>
-                    <div class="progress-segment" data-step-index="7"></div>
+                <div class="progress-segment" data-step-index="0"></div>
+                <div class="progress-segment" data-step-index="1"></div>
+                <div class="progress-segment" data-step-index="2"></div>
+                <div class="progress-segment" data-step-index="3"></div>
+                <div class="progress-segment" data-step-index="4"></div>
+                <div class="progress-segment" data-step-index="5"></div>
                 </div>
                 
                 <!-- Step Indicators - BELOW progress bar -->
@@ -52,29 +64,17 @@
                         </div>
                         <span class="step-label">Fact Matrix</span>
                     </div>
-                    <div class="step-item" data-step="liability-signals" onclick="switchTab('liability-signals')">
+                    <div class="step-item locked" data-step="timeline" onclick="switchTab('timeline')">
                         <div class="step-icon">
-                            <!-- Liability Signals / Warning icon -->
+                            <!-- Timeline Reconstruction / Clock icon -->
                             <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-                                <path d="M10 3.33333L3.33333 16.6667H16.6667L10 3.33333Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                                <path d="M10 11.6667V8.33333" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                                <circle cx="10" cy="13.3333" r="0.833333" fill="currentColor"/>
+                                <circle cx="10" cy="10" r="7.5" stroke="currentColor" stroke-width="2"/>
+                                <path d="M10 5V10L13.3333 13.3333" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
                             </svg>
                         </div>
-                        <span class="step-label">Liability Signals</span>
+                        <span class="step-label">Timeline Reconstruction</span>
                     </div>
-                    <div class="step-item" data-step="evidence-completeness" onclick="switchTab('evidence-completeness')">
-                        <div class="step-icon">
-                            <!-- Evidence Completeness / Checklist icon -->
-                            <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-                                <path d="M16.6667 5L7.50004 14.1667L3.33337 10" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                                <path d="M3.33333 10H7.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                                <path d="M7.5 14.1667L16.6667 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                            </svg>
-                        </div>
-                        <span class="step-label">Evidence Completeness</span>
-                    </div>
-                    <div class="step-item" data-step="liability-recommendation" onclick="switchTab('liability-recommendation')">
+                    <div class="step-item locked" data-step="liability-recommendation" onclick="switchTab('liability-recommendation')">
                         <div class="step-icon">
                             <!-- Liability % Recommendation / Percentage icon -->
                             <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
@@ -85,16 +85,6 @@
                             </svg>
                         </div>
                         <span class="step-label">Liability % Recommendation</span>
-                    </div>
-                    <div class="step-item locked" data-step="timeline" onclick="switchTab('timeline')">
-                        <div class="step-icon">
-                            <!-- Timeline Reconstruction / Clock icon -->
-                            <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-                                <circle cx="10" cy="10" r="7.5" stroke="currentColor" stroke-width="2"/>
-                                <path d="M10 5V10L13.3333 13.3333" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                            </svg>
-                        </div>
-                        <span class="step-label">Timeline Reconstruction</span>
                     </div>
                     <div class="step-item locked" data-step="claim-rationale" onclick="switchTab('claim-rationale')">
                         <div class="step-icon">
@@ -109,15 +99,6 @@
                         </div>
                         <span class="step-label">Draft Claim Rationale</span>
                     </div>
-                    <div class="step-item locked" data-step="escalation-package" onclick="switchTab('escalation-package')">
-                        <div class="step-icon">
-                            <!-- Supervisor Escalation / Shield icon -->
-                            <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-                                <path d="M10 3.33333L3.33333 6.66667V10C3.33333 14.1667 6.66667 16.6667 10 17.5C13.3333 16.6667 16.6667 14.1667 16.6667 10V6.66667L10 3.33333Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                            </svg>
-                        </div>
-                        <span class="step-label">Supervisor Escalation</span>
-                    </div>
                 </div>
             </div>
             
@@ -128,17 +109,51 @@
                         <div class="file-list-header">
                             <h2>Claim Documents</h2>
                             <div class="header-actions">
-                                <button class="summary-button" id="extractFactsButton" onclick="extractFacts()">
-                                    Extract Facts & Continue
-                                </button>
                             </div>
+                        </div>
+                        <div class="upload-section-main">
+                            <button class="big-upload-button" id="bigUploadButton" onclick="triggerBulkUpload()">
+                                <span class="upload-icon">📁</span>
+                                <span class="upload-text">Upload Files</span>
+                                <span class="upload-subtext">Select multiple files to upload at once</span>
+                            </button>
+                            <p style="text-align: center; margin-top: 12px; color: #666; font-size: 0.9em;">
+                                Supported formats: PDF, PNG, JPEG, JPG, Audio (MP3, WAV, M4A, etc.)
+                            </p>
+                        </div>
+                        <div id="bulkUploadProgress" style="display: none; margin-top: 20px;">
+                            <div class="bulk-upload-status" id="bulkUploadStatus"></div>
                         </div>
                         <div class="file-list" id="fileList">
                             <!-- File list items will be generated by JavaScript -->
                         </div>
+                        
+                        <!-- Evidence Completeness Section -->
+                        <div id="evidenceCompletenessSection" style="display: none; margin-top: 30px; padding-top: 30px; border-top: 1px solid #e0e0e0;">
+                            <h3 style="margin-bottom: 20px; color: #333; font-size: 1.2em;">Evidence Completeness</h3>
+                            
+                            <div class="tab-loading" id="evidenceCompletenessLoading" style="display: none;">
+                                <div class="spinner"></div>
+                                <p>Checking evidence completeness...</p>
+                            </div>
+                            
+                            <!-- Checks Summary Section -->
+                            <div class="checks-summary-section" id="checksSummarySection" style="display: none;">
+                                <h4 style="margin-bottom: 15px; color: #666; font-size: 1em;">Completeness Checks</h4>
+                                <div class="checks-grid" id="checksGrid">
+                                    <!-- Checks will be rendered here -->
+                                </div>
+                            </div>
+                        </div>
                     </div>
                     
                     <div class="file-content-view" id="fileContentView" style="display: none;">
+                        <div class="file-content-header">
+                            <button class="back-button" onclick="showFileList()">
+                                <span class="back-icon">←</span>
+                                <span>Back to Files</span>
+                            </button>
+                        </div>
                         <div class="metadata" id="metadata"></div>
                         <div class="pages" id="pages"></div>
                     </div>
@@ -148,8 +163,7 @@
                 <div class="tab-content" id="factMatrixTab" style="display: none;">
                     <div class="fact-matrix-view" id="factMatrixView">
                         <div class="fact-matrix-header">
-                            <h2>Fact Matrix</h2>
-                            <button class="export-button" id="exportButton" onclick="exportFactsAsJSON()">Export JSON</button>
+                            <h2>Fact Matrix & Liability Signals</h2>
                         </div>
                     
                     <div class="fact-matrix-controls">
@@ -192,17 +206,7 @@
                         </div>
                     </div>
                     
-                    <div class="tab-loading" id="factMatrixLoading" style="display: none;">
-                        <div class="spinner"></div>
-                        <p>Processing...</p>
-                    </div>
-                    
                     <div class="fact-matrix-split-container" id="factMatrixSplitContainer">
-                        <div class="conflicts-panel" id="conflictsPanel" style="display: none;">
-                            <h3>Conflicting Facts</h3>
-                            <div id="conflictsContent"></div>
-                        </div>
-                        
                         <div class="fact-matrix-content">
                             <div class="fact-table-container">
                                 <table class="fact-table" id="factTable">
@@ -213,14 +217,20 @@
                                             <th>Extracted Fact</th>
                                             <th>Category</th>
                                             <th>Source</th>
-                                            <th>Implied</th>
-                                            <th>Contradicting</th>
+                                            <th>Conflict</th>
+                                            <th>Signal Type</th>
+                                            <th>Impact on Liability</th>
+                                            <th>Severity</th>
                                         </tr>
                                     </thead>
                                     <tbody id="factTableBody">
                                         <!-- Facts will be rendered here -->
                                     </tbody>
                                 </table>
+                                <div class="tab-loading" id="factMatrixLoading" style="display: none;">
+                                    <div class="spinner"></div>
+                                    <p>Processing...</p>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -245,97 +255,19 @@
                     </div>
                 </div>
                 
-                <!-- Liability Signals Tab -->
-                <div class="tab-content" id="liabilitySignalsTab" style="display: none;">
-                    <div class="liability-signals-view" id="liabilitySignalsView">
-                        <div class="liability-signals-header">
-                            <h2>Liability Signals</h2>
-                            <button class="summary-button" id="analyzeSignalsButton" onclick="analyzeLiabilitySignals()">
-                                Analyze Signals
-                            </button>
-                        </div>
-                    
-                        <div class="liability-signals-content">
-                            <div class="tab-loading" id="liabilitySignalsLoading" style="display: none;">
-                                <div class="spinner"></div>
-                                <p>Processing...</p>
-                            </div>
-                            <div class="liability-signals-table-container">
-                                <table class="liability-signals-table" id="liabilitySignalsTable">
-                                    <thead>
-                                        <tr>
-                                            <th>Signal Type</th>
-                                            <th>Evidence Text</th>
-                                            <th>Impact on Liability</th>
-                                            <th>Severity Score</th>
-                                            <th>Related Facts</th>
-                                            <th>Discrepancies</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody id="liabilitySignalsTableBody">
-                                        <!-- Signals will be rendered here -->
-                                        <tr>
-                                            <td colspan="6" style="text-align: center; padding: 40px;">
-                                                <p class="empty-state">Click "Analyze Signals" to identify liability signals from the fact matrix.</p>
-                                            </td>
-                                        </tr>
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                
-                <!-- Evidence Completeness Tab -->
-                <div class="tab-content" id="evidenceCompletenessTab" style="display: none;">
-                    <div class="evidence-completeness-view" id="evidenceCompletenessView">
-                        <div class="evidence-completeness-header">
-                            <h2>Evidence Completeness Check</h2>
-                            <button class="summary-button" id="checkEvidenceButton" onclick="checkEvidenceCompleteness()">
-                                Check Completeness
-                            </button>
-                        </div>
-                    
-                        <div class="evidence-completeness-content">
-                            <div class="tab-loading" id="evidenceCompletenessLoading" style="display: none;">
-                                <div class="spinner"></div>
-                                <p>Processing...</p>
-                            </div>
-                            <!-- Checks Summary Section -->
-                            <div class="checks-summary-section" id="checksSummarySection" style="display: none;">
-                                <h3>Completeness Checks</h3>
-                                <div class="checks-grid" id="checksGrid">
-                                    <!-- Checks will be rendered here -->
-                                </div>
-                            </div>
-                            
-                            <!-- Missing Evidence Checklist Section -->
-                            <div class="missing-evidence-section" id="missingEvidenceSection" style="display: none;">
-                                <h3>Missing Evidence Checklist</h3>
-                                <div class="missing-evidence-list" id="missingEvidenceList">
-                                    <!-- Missing evidence items will be rendered here -->
-                                </div>
-                            </div>
-                            
-                            <!-- Empty State -->
-                            <div class="empty-state-container" id="evidenceEmptyState">
-                                <p class="empty-state">Extract facts first, then click "Check Completeness" to analyze the evidence package for missing items.</p>
-                            </div>
-                        </div>
-                    </div>
-                </div>
                 
                 <!-- Liability Recommendation Tab -->
                 <div class="tab-content" id="liabilityRecommendationTab" style="display: none;">
                     <div class="liability-recommendation-view" id="liabilityRecommendationView">
                         <div class="liability-recommendation-header">
                             <h2>Liability % Recommendation</h2>
-                            <button class="summary-button" id="getRecommendationButton" onclick="getLiabilityRecommendation()">
-                                Get Recommendation
-                            </button>
                         </div>
                     
                         <div class="liability-recommendation-content">
+                            <div class="tab-loading" id="liabilityRecommendationLoading" style="display: none;">
+                                <div class="spinner"></div>
+                                <p>Processing...</p>
+                            </div>
                             <div class="recommendation-form" id="recommendationForm" style="display: none;">
                                 <div class="recommendation-percentages">
                                     <div class="percentage-input-group">
@@ -398,9 +330,6 @@
                         <div class="timeline-header">
                             <h2>Timeline Reconstruction</h2>
                             <div class="timeline-header-actions">
-                                <button class="summary-button" id="generateTimelineButton" onclick="generateTimeline()">
-                                    Generate Timeline
-                                </button>
                                 <button class="summary-button" id="saveTimelineButton" onclick="saveTimeline()" style="display: none;">
                                     Save Timeline
                                 </button>
@@ -419,7 +348,10 @@
                             </div>
                             
                             <div class="empty-state-container" id="timelineEmptyState">
-                                <p class="empty-state">Extract facts first, then click "Generate Timeline" to reconstruct the sequence of events leading to the collision.</p>
+                                <p class="empty-state">No timeline has been generated yet. Click the button below to generate a timeline reconstruction from the extracted facts.</p>
+                                <button class="summary-button" id="generateTimelineButton" onclick="generateTimeline()" style="margin-top: 20px;">
+                                    Generate Timeline
+                                </button>
                             </div>
                         </div>
                     </div>
@@ -430,40 +362,35 @@
                     <div class="claim-rationale-view" id="claimRationaleView">
                         <div class="claim-rationale-header">
                             <h2>Draft Claim File Rationale</h2>
-                            <button class="summary-button" id="generateRationaleButton" onclick="generateClaimRationale()">
-                                Generate Rationale
-                            </button>
+                            <div class="claim-rationale-actions">
+                                <button class="summary-button" id="editRationaleButton" onclick="toggleEditRationale()" style="display: none;">
+                                    Edit
+                                </button>
+                                <button class="summary-button" id="saveRationaleButton" onclick="saveEditedRationale()" style="display: none;">
+                                    Save
+                                </button>
+                                <button class="summary-button" id="cancelEditRationaleButton" onclick="cancelEditRationale()" style="display: none;">
+                                    Cancel
+                                </button>
+                                <button class="summary-button" id="supervisorEscalationButton" onclick="openSupervisorEscalationModal()" style="display: none;">
+                                    Supervisor Escalation
+                                </button>
+                                <button class="summary-button" id="downloadRationaleButton" onclick="downloadClaimRationalePDF()" style="display: none;">
+                                    Download
+                                </button>
+                            </div>
                         </div>
                     
                         <div class="claim-rationale-content">
                             <div class="rationale-display" id="rationaleDisplay" style="display: none;">
                                 <!-- Rationale will be displayed here -->
                             </div>
+                            <div class="rationale-edit" id="rationaleEdit" style="display: none;">
+                                <!-- Editable rationale will be displayed here -->
+                            </div>
                             
                             <div class="empty-state-container" id="rationaleEmptyState">
                                 <p class="empty-state">Extract facts and analyze liability signals first, then click "Generate Rationale" to create an audit-ready adjuster narrative.</p>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                
-                <!-- Supervisor Escalation Package Tab -->
-                <div class="tab-content" id="escalationPackageTab" style="display: none;">
-                    <div class="escalation-package-view" id="escalationPackageView">
-                        <div class="escalation-package-header">
-                            <h2>Supervisor Escalation Packaging</h2>
-                            <button class="summary-button" id="generateEscalationButton" onclick="generateEscalationPackage()">
-                                Generate Escalation Package
-                            </button>
-                        </div>
-                    
-                        <div class="escalation-package-content">
-                            <div class="escalation-display" id="escalationDisplay" style="display: none;">
-                                <!-- Escalation package will be displayed here -->
-                            </div>
-                            
-                            <div class="empty-state-container" id="escalationEmptyState">
-                                <p class="empty-state">Extract facts and analyze liability signals first, then click "Generate Escalation Package" to create a condensed high-risk summary for supervisor review.</p>
                             </div>
                         </div>
                     </div>
@@ -483,16 +410,64 @@
 
         <div class="loading" id="loading" style="display: none;">
             <div class="spinner"></div>
-            <p>Processing file...</p>
         </div>
 
         <div class="error" id="error" style="display: none;"></div>
         
         <!-- Hidden file input for uploads -->
-        <input type="file" id="fileInput" accept=".pdf,.jpg,.jpeg,.png,.gif,.webp,.bmp" hidden>
+        <input type="file" id="fileInput" accept=".pdf,.jpg,.jpeg,.png,.mp3,.wav,.m4a,.mp4,.mpeg,.mpga,.webm,.ogg" hidden>
+        <input type="file" id="bulkFileInput" accept=".pdf,.jpg,.jpeg,.png,.mp3,.wav,.m4a,.mp4,.mpeg,.mpga,.webm,.ogg" multiple hidden>
+        
+        <!-- Floating Upload Button - Always Visible -->
+        <button class="floating-upload-button" id="floatingUploadButton" onclick="triggerBulkUpload()" title="Upload Files">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                <polyline points="17 8 12 3 7 8"></polyline>
+                <line x1="12" y1="3" x2="12" y2="15"></line>
+            </svg>
+        </button>
     </div>
 
+    <!-- Conflict Resolution Modal -->
+    <div id="conflictModal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Resolve Conflict</h3>
+                <span class="modal-close" onclick="closeConflictModal()">&times;</span>
+            </div>
+            <div class="modal-body" id="conflictModalBody">
+                <!-- Modal content will be populated by JavaScript -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Supervisor Escalation Modal -->
+    <div id="supervisorEscalationModal" class="modal" style="display: none;">
+        <div class="modal-content" style="max-width: 800px;">
+            <div class="modal-header">
+                <h3>Supervisor Escalation Package</h3>
+                <span class="modal-close" onclick="closeSupervisorEscalationModal()">&times;</span>
+            </div>
+            <div class="modal-body" id="supervisorEscalationModalBody">
+                <div class="tab-loading" id="escalationModalLoading" style="display: none;">
+                    <div class="spinner"></div>
+                    <p>Generating escalation package...</p>
+                </div>
+                <div id="escalationModalContent" style="display: none;">
+                    <!-- Escalation package content will be populated here -->
+                </div>
+            </div>
+            <div class="modal-actions" id="supervisorEscalationModalActions" style="display: none;">
+                <button class="modal-button modal-button-secondary" onclick="closeSupervisorEscalationModal()">Cancel</button>
+                <button class="modal-button modal-button-primary" onclick="sendToSupervisor()">Send to Supervisor</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Legacy script.js - will be removed after full migration -->
     <script src="{{ url_for('static', filename='script.js') }}"></script>
+    <!-- New modular structure -->
+    <script type="module" src="{{ url_for('static', filename='js/main.js') }}"></script>
 </body>
 </html>
 

@@ -1,0 +1,9 @@
+# Test automation dependencies (Python)
+# Note: Main testing framework uses Node.js/Playwright
+# Python dependencies are for API testing and test utilities
+
+pytest>=7.4.0
+pytest-playwright>=0.4.0
+requests>=2.31.0
+
+

@@ -1,0 +1,90 @@
+name: Test Automation
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  schedule:
+    # Run tests daily at 2 AM UTC
+    - cron: '0 2 * * *'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Setup Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: '18'
+        cache: 'npm'
+        cache-dependency-path: tests/package.json
+    
+    - name: Install dependencies
+      run: |
+        cd tests
+        npm ci
+        npx playwright install --with-deps
+    
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Install Python dependencies
+      run: |
+        pip install -r requirements.txt
+    
+    - name: Set environment variables
+      env:
+        OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      run: |
+        cd tests
+        echo "BASE_URL=http://localhost:5000" >> .env
+        echo "OPENAI_API_KEY=$OPENAI_API_KEY" >> .env
+    
+    - name: Start application
+      run: |
+        python app.py &
+        sleep 10
+    
+    - name: Run navigation tests
+      run: |
+        cd tests
+        npm run test:navigation
+    
+    - name: Run edge case tests
+      run: |
+        cd tests
+        npm run test:edge-cases
+      continue-on-error: true
+    
+    - name: Upload test results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: test-results
+        path: |
+          tests/reports/
+          tests/test-results/
+    
+    - name: Upload screenshots
+      uses: actions/upload-artifact@v3
+      if: failure()
+      with:
+        name: test-screenshots
+        path: tests/reports/screenshots/
+    
+    - name: Publish test report
+      uses: dorny/test-reporter@v1
+      if: always()
+      with:
+        name: Playwright Tests
+        path: tests/reports/junit.xml
+        reporter: java-junit
+        fail-on-error: false
+
+
