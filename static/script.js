@@ -39,6 +39,9 @@ let currentClaimRationaleData = null;
 let currentEscalationPackageData = null;
 let isEscalatedToSupervisor = false;
 
+// Flag to prevent multiple simultaneous calls to analyzeLiabilitySignals
+let isAnalyzingLiabilitySignals = false;
+
 // Store missing evidence and email tracking
 let currentMissingEvidence = [];
 let sentEmails = {}; // Track sent emails by evidence item
@@ -2419,19 +2422,30 @@ function closeAllConflictsResolvedPopup() {
     console.log('LIABILITY_SIGNAL_LOG: [closeAllConflictsResolvedPopup] - step1Completion.liabilitySignals:', step1Completion.liabilitySignals);
     console.log('LIABILITY_SIGNAL_LOG: [closeAllConflictsResolvedPopup] - currentLiabilitySignalsData exists:', !!currentLiabilitySignalsData);
     console.log('LIABILITY_SIGNAL_LOG: [closeAllConflictsResolvedPopup] - currentLiabilitySignalsData signals count:', currentLiabilitySignalsData?.signals?.length || 0);
+    console.log('LIABILITY_SIGNAL_LOG: [closeAllConflictsResolvedPopup] - isAnalyzingLiabilitySignals:', isAnalyzingLiabilitySignals);
     
-    // If liability signals haven't been analyzed yet, analyze them now
+    // Don't trigger analysis if it's already in progress (prevent duplicate calls)
+    if (isAnalyzingLiabilitySignals) {
+        console.log('LIABILITY_SIGNAL_LOG: [closeAllConflictsResolvedPopup] Analysis already in progress, skipping duplicate call');
+        return;
+    }
+    
+    // Only trigger analysis if it hasn't been started yet and liability signals haven't been analyzed
+    // The acceptConflictVersion function already triggers analysis, so we only need to handle edge cases here
     if (!step1Completion.liabilitySignals || !currentLiabilitySignalsData) {
         console.log('LIABILITY_SIGNAL_LOG: [closeAllConflictsResolvedPopup] Liability signals not analyzed yet, will trigger analysis');
-        // Automatically analyze liability signals
+        // Wait a bit longer to ensure the call from acceptConflictVersion has started
         setTimeout(() => {
-            console.log('LIABILITY_SIGNAL_LOG: [closeAllConflictsResolvedPopup] Executing analyzeLiabilitySignals() after timeout (500ms)...');
-            analyzeLiabilitySignals();
-        }, 500);
+            // Double-check that analysis hasn't started in the meantime
+            if (!isAnalyzingLiabilitySignals && (!step1Completion.liabilitySignals || !currentLiabilitySignalsData)) {
+                console.log('LIABILITY_SIGNAL_LOG: [closeAllConflictsResolvedPopup] Executing analyzeLiabilitySignals() after timeout (800ms)...');
+                analyzeLiabilitySignals();
+            } else {
+                console.log('LIABILITY_SIGNAL_LOG: [closeAllConflictsResolvedPopup] Analysis already started or completed, skipping');
+            }
+        }, 800);
     } else {
-        console.log('LIABILITY_SIGNAL_LOG: [closeAllConflictsResolvedPopup] Liability signals already exist, re-analyzing to reflect updated facts');
-        // Re-analyze liability signals if they exist (to reflect updated facts)
-        analyzeLiabilitySignals();
+        console.log('LIABILITY_SIGNAL_LOG: [closeAllConflictsResolvedPopup] Liability signals already exist, no need to re-analyze');
     }
 }
 
@@ -2666,6 +2680,12 @@ function analyzeLiabilitySignals() {
     console.log('LIABILITY_SIGNAL_LOG: [analyzeLiabilitySignals] Timestamp:', timestamp);
     console.log('LIABILITY_SIGNAL_LOG: [analyzeLiabilitySignals] Function called from:', new Error().stack?.split('\n')[2]?.trim() || 'unknown');
     
+    // Prevent multiple simultaneous calls
+    if (isAnalyzingLiabilitySignals) {
+        console.log('LIABILITY_SIGNAL_LOG: [analyzeLiabilitySignals] Analysis already in progress, skipping duplicate call');
+        return;
+    }
+    
     // Check if fact matrix exists
     console.log('LIABILITY_SIGNAL_LOG: [analyzeLiabilitySignals] Validating facts data...');
     console.log('LIABILITY_SIGNAL_LOG: [analyzeLiabilitySignals] - currentFactsData exists:', !!currentFactsData);
@@ -2677,6 +2697,10 @@ function analyzeLiabilitySignals() {
         showError('Please extract facts first before analyzing liability signals.');
         return;
     }
+    
+    // Set flag to indicate analysis is in progress
+    isAnalyzingLiabilitySignals = true;
+    console.log('LIABILITY_SIGNAL_LOG: [analyzeLiabilitySignals] Set isAnalyzingLiabilitySignals = true');
     
     console.log('LIABILITY_SIGNAL_LOG: [analyzeLiabilitySignals] Facts validation passed');
     
@@ -2736,6 +2760,9 @@ function analyzeLiabilitySignals() {
             console.error('LIABILITY_SIGNAL_LOG: [analyzeLiabilitySignals] ERROR from server:', data.error);
             clearProcessingFromLiabilityColumns();
             showError(data.error);
+            // Reset flag on error
+            isAnalyzingLiabilitySignals = false;
+            console.log('LIABILITY_SIGNAL_LOG: [analyzeLiabilitySignals] Reset isAnalyzingLiabilitySignals = false (error)');
         } else if (data.signals) {
             console.log('LIABILITY_SIGNAL_LOG: [analyzeLiabilitySignals] Success! Processing signals data...');
             console.log('LIABILITY_SIGNAL_LOG: [analyzeLiabilitySignals] - Signals sample:', data.signals.slice(0, 2).map(s => ({
@@ -2762,11 +2789,18 @@ function analyzeLiabilitySignals() {
             
             showSuccess('Facts extracted and liability signals analyzed successfully.');
             console.log('LIABILITY_SIGNAL_LOG: [analyzeLiabilitySignals] ========== SUCCESS COMPLETE ==========');
+            
+            // Reset flag on success
+            isAnalyzingLiabilitySignals = false;
+            console.log('LIABILITY_SIGNAL_LOG: [analyzeLiabilitySignals] Reset isAnalyzingLiabilitySignals = false (success)');
         } else {
             console.error('LIABILITY_SIGNAL_LOG: [analyzeLiabilitySignals] ERROR: No signals in response');
             console.log('LIABILITY_SIGNAL_LOG: [analyzeLiabilitySignals] Response data:', data);
             clearProcessingFromLiabilityColumns();
             showError('No signals received from server.');
+            // Reset flag on error
+            isAnalyzingLiabilitySignals = false;
+            console.log('LIABILITY_SIGNAL_LOG: [analyzeLiabilitySignals] Reset isAnalyzingLiabilitySignals = false (no signals)');
         }
     })
     .catch(err => {
@@ -2780,6 +2814,10 @@ function analyzeLiabilitySignals() {
         clearProcessingFromLiabilityColumns();
         showError('Failed to analyze liability signals. Please try again.');
         console.error('Error:', err);
+        
+        // Reset flag on exception
+        isAnalyzingLiabilitySignals = false;
+        console.log('LIABILITY_SIGNAL_LOG: [analyzeLiabilitySignals] Reset isAnalyzingLiabilitySignals = false (exception)');
     });
 }
 
