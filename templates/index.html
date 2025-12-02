@@ -22,86 +22,67 @@
 </head>
 <body>
     <div class="container">
-        <header>
-            <h1>AVA</h1>
-            <p>Automated Vehicle Adjudicator</p>
-        </header>
-
-        <div class="files-section" id="filesSection">
-            <!-- Step Progress Indicator -->
-            <div class="step-progress-container">
-                <!-- Segmented Progress Bar - ABOVE step indicators -->
-                <div class="segmented-progress-bar" id="segmentedProgressBar">
-                <div class="progress-segment" data-step-index="0"></div>
-                <div class="progress-segment" data-step-index="1"></div>
-                <div class="progress-segment" data-step-index="2"></div>
-                <div class="progress-segment" data-step-index="3"></div>
-                <div class="progress-segment" data-step-index="4"></div>
-                <div class="progress-segment" data-step-index="5"></div>
+        <header class="main-header">
+            <div class="header-left">
+                <h1 class="ava-brand">ava</h1>
+            </div>
+            <div class="step-indicators">
+                <div class="step-item completed" data-step="files" onclick="switchTab('files')">
+                    <span class="step-label">Review</span>
                 </div>
-                
-                <!-- Step Indicators - BELOW progress bar -->
-                <div class="step-indicators">
-                    <div class="step-item completed" data-step="files" onclick="switchTab('files')">
-                        <div class="step-icon">
-                            <!-- Files icon -->
-                            <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-                                <path d="M5.83333 3.33333H11.6667L14.1667 5.83333V16.6667H5.83333V3.33333Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                                <path d="M11.6667 3.33333V5.83333H14.1667" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                            </svg>
-                        </div>
-                        <span class="step-label">Review</span>
-                    </div>
-                    <div class="step-item" data-step="fact-matrix" onclick="switchTab('fact-matrix')">
-                        <div class="step-icon">
-                            <!-- Fact Matrix / Grid icon -->
-                            <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-                                <path d="M3.33333 3.33333H8.33333V8.33333H3.33333V3.33333Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                                <path d="M11.6667 3.33333H16.6667V8.33333H11.6667V3.33333Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                                <path d="M3.33333 11.6667H8.33333V16.6667H3.33333V11.6667Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                                <path d="M11.6667 11.6667H16.6667V16.6667H11.6667V11.6667Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                            </svg>
-                        </div>
-                        <span class="step-label">Fact Matrix</span>
-                    </div>
-                    <div class="step-item locked" data-step="timeline" onclick="switchTab('timeline')">
-                        <div class="step-icon">
-                            <!-- Timeline Reconstruction / Clock icon -->
-                            <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-                                <circle cx="10" cy="10" r="7.5" stroke="currentColor" stroke-width="2"/>
-                                <path d="M10 5V10L13.3333 13.3333" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                            </svg>
-                        </div>
-                        <span class="step-label">Timeline Reconstruction</span>
-                    </div>
-                    <div class="step-item locked" data-step="liability-recommendation" onclick="switchTab('liability-recommendation')">
-                        <div class="step-icon">
-                            <!-- Liability % Recommendation / Percentage icon -->
-                            <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-                                <path d="M10 3.33333C6.31814 3.33333 3.33333 6.31814 3.33333 10C3.33333 13.6819 6.31814 16.6667 10 16.6667C13.6819 16.6667 16.6667 13.6819 16.6667 10C16.6667 6.31814 13.6819 3.33333 10 3.33333Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                                <path d="M10 6.66667V10L12.5 12.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                                <path d="M7.5 7.5H12.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-                                <path d="M7.5 12.5H12.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-                            </svg>
-                        </div>
-                        <span class="step-label">Liability % Recommendation</span>
-                    </div>
-                    <div class="step-item locked" data-step="claim-rationale" onclick="switchTab('claim-rationale')">
-                        <div class="step-icon">
-                            <!-- Draft Claim Rationale / Document edit icon -->
-                            <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-                                <path d="M5 5H15V15H5V5Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                                <path d="M7.5 7.5H12.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-                                <path d="M7.5 10H12.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-                                <path d="M7.5 12.5H10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-                                <path d="M12.5 7.5L15 10L12.5 12.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                            </svg>
-                        </div>
-                        <span class="step-label">Draft Claim Rationale</span>
-                    </div>
+                <div class="step-item" data-step="fact-matrix" onclick="switchTab('fact-matrix')">
+                    <span class="step-label">Fact Matrix</span>
+                </div>
+                <div class="step-item locked" data-step="timeline" onclick="switchTab('timeline')">
+                    <span class="step-label">Timeline Reconstruction</span>
+                </div>
+                <div class="step-item locked" data-step="liability-recommendation" onclick="switchTab('liability-recommendation')">
+                    <span class="step-label">Liability % Recommendation</span>
+                </div>
+                <div class="step-item locked" data-step="claim-rationale" onclick="switchTab('claim-rationale')">
+                    <span class="step-label">Draft Claim Rationale</span>
                 </div>
             </div>
-            
+            <div class="header-right">
+                <div class="user-menu">
+                    <button class="logout-button" onclick="handleLogout()">Logout</button>
+                </div>
+            </div>
+        </header>
+
+        <!-- Progress Bar -->
+        <div class="progress-bar-container">
+            <div class="progress-bar" id="progressBar">
+                <div class="progress-fill" id="progressFill"></div>
+            </div>
+        </div>
+
+        <div class="main-layout">
+            <!-- Left Sidebar -->
+            <aside class="sidebar">
+                <div class="claimant-contact">
+                    <h3>Claimant Contact</h3>
+                    <div class="contact-item">
+                        <svg class="contact-icon" width="16" height="16" viewBox="0 0 16 16" fill="none">
+                            <path d="M2 4L8 8L14 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                            <rect x="2" y="3" width="12" height="10" rx="1" stroke="currentColor" stroke-width="1.5"/>
+                        </svg>
+                        <span>john.anderson@email.com</span>
+                    </div>
+                    <div class="contact-item">
+                        <svg class="contact-icon" width="16" height="16" viewBox="0 0 16 16" fill="none">
+                            <path d="M3.5 2C2.67157 2 2 2.67157 2 3.5V12.5C2 13.3284 2.67157 14 3.5 14H5.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                            <path d="M10.5 2H12.5C13.3284 2 14 2.67157 14 3.5V12.5C14 13.3284 13.3284 14 12.5 14H10.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                            <path d="M6 4H10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                        </svg>
+                        <span>(555) 123-4567</span>
+                    </div>
+                </div>
+            </aside>
+
+            <!-- Main Content Area -->
+            <main class="main-content">
+        <div class="files-section" id="filesSection">
             <div class="content-section">
                 <!-- Files Tab -->
                 <div class="tab-content active" id="filesTab">
@@ -349,11 +330,6 @@
                     <div class="timeline-view" id="timelineView">
                         <div class="timeline-header">
                             <h2>Timeline Reconstruction</h2>
-                            <div class="timeline-header-actions">
-                                <button class="summary-button" id="saveTimelineButton" onclick="saveTimeline()" style="display: none;">
-                                    Save Timeline
-                                </button>
-                            </div>
                         </div>
                     
                         <div class="timeline-content">
@@ -365,13 +341,11 @@
                                 <ol class="timeline-events-list" id="timelineEventsList">
                                     <!-- Timeline events will be rendered here -->
                                 </ol>
-                            </div>
-                            
-                            <div class="empty-state-container" id="timelineEmptyState">
-                                <p class="empty-state">No timeline has been generated yet. Click the button below to generate a timeline reconstruction from the extracted facts.</p>
-                                <button class="summary-button" id="generateTimelineButton" onclick="generateTimeline()" style="margin-top: 20px;">
-                                    Generate Timeline
-                                </button>
+                                <div class="timeline-actions" style="margin-top: 30px; display: flex; justify-content: flex-end;">
+                                    <button class="summary-button" id="saveTimelineButton" onclick="saveTimeline()" style="display: none;">
+                                        Save Timeline
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -402,6 +376,10 @@
                         </div>
                     
                         <div class="claim-rationale-content">
+                            <div class="tab-loading" id="claimRationaleLoading" style="display: none;">
+                                <div class="spinner"></div>
+                                <p>Generating claim rationale...</p>
+                            </div>
                             <div class="rationale-display" id="rationaleDisplay" style="display: none;">
                                 <!-- Rationale will be displayed here -->
                             </div>
@@ -426,6 +404,8 @@
                     </button>
                 </div>
             </div>
+        </div>
+            </main>
         </div>
 
         <div class="loading" id="loading" style="display: none;">

@@ -2,12 +2,16 @@
 Document processing service for fact extraction.
 """
 import sys
+import logging
 from typing import List, Dict, Any
 from app.config import Config
 from app.services.openai_service import get_openai_service
 from app.prompts import get_fact_extraction_prompt
 from app.utils.file_utils import identify_document_source
 from app.utils.fact_utils import normalize_facts, detect_conflicts
+
+# Set up logging
+logger = logging.getLogger(__name__)
 
 
 def extract_facts_from_documents(files_data: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -149,21 +153,56 @@ def extract_facts_from_documents(files_data: List[Dict[str, Any]]) -> Dict[str, 
         try:
             content_size = sys.getsizeof(str(content_parts))
             if content_size > 20 * 1024 * 1024:  # 20MB warning
-                print(f"Warning: Large content payload ({content_size / (1024*1024):.1f}MB) being sent to OpenAI API")
-        except Exception:
+                warning_msg = f"Large content payload ({content_size / (1024*1024):.1f}MB) being sent to OpenAI API"
+                logger.warning(warning_msg)
+                print(f"Warning: {warning_msg}")
+        except Exception as size_error:
+            logger.debug(f"Could not estimate content size: {str(size_error)}")
             pass  # Ignore size estimation errors
         
-        result = openai_service.call_with_json_response(
-            system_prompt=None,
-            user_content=content_parts,
-            max_tokens=4000
-        )
+        logger.info(f"Calling OpenAI API with {len(content_parts)} content parts")
+        print(f"DEBUG: extract_facts_from_documents: Calling OpenAI API with {len(content_parts)} content parts")
+        
+        try:
+            result = openai_service.call_with_json_response(
+                system_prompt=None,
+                user_content=content_parts,
+                max_tokens=4000
+            )
+            logger.debug(f"OpenAI API call completed, result type: {type(result).__name__}, is None: {result is None}")
+        except ValueError as ve:
+            error_msg = f"OpenAI API returned invalid response: {str(ve)}"
+            logger.error(error_msg, exc_info=True)
+            print(f"ERROR: {error_msg}")
+            import traceback
+            print(f"ERROR: Traceback: {traceback.format_exc()}")
+            raise Exception(error_msg)
+        except TypeError as te:
+            error_msg = f"OpenAI API returned unexpected type: {str(te)}"
+            logger.error(error_msg, exc_info=True)
+            print(f"ERROR: {error_msg}")
+            import traceback
+            print(f"ERROR: Traceback: {traceback.format_exc()}")
+            raise Exception(error_msg)
+        except Exception as api_error:
+            error_msg = f"OpenAI API call failed: {str(api_error)}"
+            logger.error(error_msg, exc_info=True)
+            print(f"ERROR: {error_msg}")
+            import traceback
+            print(f"ERROR: Traceback: {traceback.format_exc()}")
+            raise Exception(error_msg)
         
         # Clean up content_parts to free memory
         del content_parts
         
+        logger.debug(f"OpenAI API returned result type: {type(result).__name__}, is None: {result is None}")
+        print(f"DEBUG: extract_facts_from_documents: OpenAI API returned result type: {type(result).__name__}, is None: {result is None}")
+        
         if not result:
-            raise Exception("Failed to get response from OpenAI")
+            error_msg = "Failed to get response from OpenAI (result is None or empty)"
+            logger.error(error_msg)
+            print(f"ERROR: {error_msg}")
+            raise Exception(error_msg)
         
         facts = result.get('facts', [])
         
@@ -230,10 +269,16 @@ def extract_facts_from_documents(files_data: List[Dict[str, Any]]) -> Dict[str, 
     
     except MemoryError as mem_error:
         error_msg = f"Insufficient memory during OpenAI API call. Try reducing the number of images or files."
+        logger.error(error_msg, exc_info=True)
         print(f"Memory error in extract_facts_from_documents: {mem_error}")
+        import traceback
+        print(f"ERROR: Traceback: {traceback.format_exc()}")
         raise Exception(error_msg)
     except Exception as e:
         error_msg = str(e)
+        logger.error(f"Error in extract_facts_from_documents: {error_msg}", exc_info=True)
         print(f"Error in extract_facts_from_documents: {error_msg}")
+        import traceback
+        print(f"ERROR: Traceback: {traceback.format_exc()}")
         raise Exception(f"Fact extraction failed: {error_msg}")
 

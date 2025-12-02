@@ -279,8 +279,12 @@ function isStepAccessible(stepId) {
     }
     
     // For timeline and claim-rationale steps, require all conflicts to be resolved
-    if ((stepId === 'timeline' || stepId === 'claim-rationale') && !checkIfAllConflictsResolved()) {
-        return false;
+    if ((stepId === 'timeline' || stepId === 'claim-rationale')) {
+        const allResolved = checkIfAllConflictsResolved();
+        console.log(`DEBUG: isStepAccessible(${stepId}) - conflicts resolved: ${allResolved}`);
+        if (!allResolved) {
+            return false;
+        }
     }
     
     return requirementsMet;
@@ -309,28 +313,26 @@ function updateStepIndicators() {
     });
 }
 
-// Update segmented progress bar
+// Update progress bar
 function updateProgress() {
-    const segmentedProgressBar = document.getElementById('segmentedProgressBar');
-    if (!segmentedProgressBar) return;
+    const progressFill = document.getElementById('progressFill');
+    if (!progressFill) return;
     
-    // Update each segment based on step completion
-    steps.forEach((step, index) => {
-        const segment = segmentedProgressBar.querySelector(`[data-step-index="${index}"]`);
-        if (!segment) return;
-        
-        const isCompleted = isStepCompleted(step.id);
-        
-        // Remove all state classes
-        segment.classList.remove('completed', 'incomplete');
-        
-        // Add appropriate class
-        if (isCompleted) {
-            segment.classList.add('completed');
-        } else {
-            segment.classList.add('incomplete');
+    // Calculate progress based on completed steps
+    let completedCount = 0;
+    const totalSteps = steps.length;
+    
+    steps.forEach(step => {
+        if (isStepCompleted(step.id)) {
+            completedCount++;
         }
     });
+    
+    // Calculate percentage (0-100)
+    const progressPercentage = totalSteps > 0 ? (completedCount / totalSteps) * 100 : 0;
+    
+    // Update progress bar
+    progressFill.style.width = `${progressPercentage}%`;
 }
 
     // Tab switching function
@@ -344,8 +346,13 @@ function switchTab(tabName, skipLoadTimeline = false) {
         // Special message for timeline and claim-rationale when no facts exist
         if ((tabName === 'timeline' || tabName === 'claim-rationale') && !hasAtLeastOneFact()) {
             showError('Please extract at least one fact before accessing this step.');
-        } else if ((tabName === 'timeline' || tabName === 'claim-rationale') && !checkIfAllConflictsResolved()) {
-            showError('Please resolve all conflicts in the Fact Matrix before accessing this step.');
+        } else if ((tabName === 'timeline' || tabName === 'claim-rationale')) {
+            const allResolved = checkIfAllConflictsResolved();
+            console.log(`DEBUG: switchTab(${tabName}) - conflicts resolved: ${allResolved}`);
+            if (!allResolved) {
+                showError('Please resolve all conflicts in the Fact Matrix before accessing this step.');
+                return;
+            }
         } else {
             showError('Please complete the previous steps first.');
         }
@@ -439,13 +446,38 @@ function goToNextStep() {
             }
         } else if (currentStepIndex === 1 && nextStep.id === 'timeline') {
             // If we're on Fact Matrix tab and going to Timeline, check for conflicts first
+            console.log('DEBUG: ========== goToNextStep - checking conflicts before timeline ==========');
+            console.log('DEBUG: currentFactsData exists:', !!currentFactsData);
+            console.log('DEBUG: currentFactsData:', currentFactsData);
+            console.log('DEBUG: conflicts exists:', !!currentFactsData?.conflicts);
+            console.log('DEBUG: conflicts:', currentFactsData?.conflicts);
+            console.log('DEBUG: conflicts length:', currentFactsData?.conflicts?.length);
+            console.log('DEBUG: conflicts is array:', Array.isArray(currentFactsData?.conflicts));
+            console.log('DEBUG: acceptedVersions exists:', !!currentFactsData?.acceptedVersions);
+            console.log('DEBUG: acceptedVersions:', currentFactsData?.acceptedVersions);
+            
             if (currentFactsData && currentFactsData.conflicts && currentFactsData.conflicts.length > 0) {
                 // Check if all conflicts are resolved
-                if (!checkIfAllConflictsResolved()) {
+                console.log('DEBUG: About to call checkIfAllConflictsResolved()');
+                const allResolved = checkIfAllConflictsResolved();
+                console.log('DEBUG: All conflicts resolved check result:', allResolved);
+                console.log('DEBUG: Result type:', typeof allResolved);
+                
+                if (!allResolved) {
+                    console.log('DEBUG: Blocking navigation - conflicts not resolved');
+                    console.log('DEBUG: Current state:');
+                    console.log('  - Conflicts count:', currentFactsData.conflicts.length);
+                    console.log('  - Accepted versions count:', currentFactsData.acceptedVersions ? Object.keys(currentFactsData.acceptedVersions).length : 0);
+                    console.log('  - Accepted versions keys:', currentFactsData.acceptedVersions ? Object.keys(currentFactsData.acceptedVersions) : 'none');
                     showError('Please resolve conflicts before proceeding.');
                     return;
+                } else {
+                    console.log('DEBUG: All conflicts resolved, allowing navigation');
                 }
+            } else {
+                console.log('DEBUG: No conflicts found, allowing navigation');
             }
+            console.log('DEBUG: ========== goToNextStep conflict check complete ==========');
             // If we're on Fact Matrix tab and going to Timeline, automatically trigger timeline generation
             // which will also generate liability recommendation
             // If conflicts are resolved (or there are no conflicts) and we have facts, allow navigation
@@ -1137,8 +1169,19 @@ function extractFacts() {
         body: JSON.stringify({ files: filesData })
     })
     .then(async response => {
-        // Check if response is OK before parsing JSON
-        const data = await response.json();
+        // Try to parse JSON response
+        let data;
+        try {
+            const text = await response.text();
+            if (text) {
+                data = JSON.parse(text);
+            } else {
+                data = {};
+            }
+        } catch (parseError) {
+            // If JSON parsing fails, create error object
+            data = { error: `Server error: ${response.status} ${response.statusText}` };
+        }
         
         if (!response.ok) {
             // Handle error responses
@@ -1154,8 +1197,26 @@ function extractFacts() {
         if (data.error) {
             showError(data.error);
         } else if (data.facts) {
-            // Store facts data
+            // Store facts data - preserve acceptedVersions if they exist
+            console.log('DEBUG: ========== Updating currentFactsData (first location) ==========');
+            console.log('DEBUG: Existing currentFactsData:', currentFactsData);
+            console.log('DEBUG: Existing acceptedVersions:', currentFactsData?.acceptedVersions);
+            console.log('DEBUG: New data from server:', data);
+            console.log('DEBUG: New data has acceptedVersions:', !!data.acceptedVersions);
+            
+            // Preserve acceptedVersions if they exist
+            if (currentFactsData && currentFactsData.acceptedVersions) {
+                console.log('DEBUG: Preserving existing acceptedVersions:', currentFactsData.acceptedVersions);
+                data.acceptedVersions = currentFactsData.acceptedVersions;
+            } else {
+                console.log('DEBUG: No existing acceptedVersions to preserve');
+            }
+            
             currentFactsData = data;
+            console.log('DEBUG: Updated currentFactsData:', currentFactsData);
+            console.log('DEBUG: Updated acceptedVersions:', currentFactsData.acceptedVersions);
+            console.log('DEBUG: ========== Update complete ==========');
+            
             // Mark Step 1 fact extraction as complete
             step1Completion.factsExtracted = true;
             updateStep2Access();
@@ -1207,8 +1268,19 @@ function extractFactsAndSignals() {
         body: JSON.stringify({ files: filesData })
     })
     .then(async response => {
-        // Check if response is OK before parsing JSON
-        const data = await response.json();
+        // Try to parse JSON response
+        let data;
+        try {
+            const text = await response.text();
+            if (text) {
+                data = JSON.parse(text);
+            } else {
+                data = {};
+            }
+        } catch (parseError) {
+            // If JSON parsing fails, create error object
+            data = { error: `Server error: ${response.status} ${response.statusText}` };
+        }
         
         if (!response.ok) {
             // Handle error responses
@@ -1223,8 +1295,26 @@ function extractFactsAndSignals() {
             hideTabLoading('factMatrix');
             showError(data.error);
         } else if (data.facts) {
-            // Store facts data
+            // Store facts data - preserve acceptedVersions if they exist
+            console.log('DEBUG: ========== Updating currentFactsData (second location) ==========');
+            console.log('DEBUG: Existing currentFactsData:', currentFactsData);
+            console.log('DEBUG: Existing acceptedVersions:', currentFactsData?.acceptedVersions);
+            console.log('DEBUG: New data from server:', data);
+            console.log('DEBUG: New data has acceptedVersions:', !!data.acceptedVersions);
+            
+            // Preserve acceptedVersions if they exist
+            if (currentFactsData && currentFactsData.acceptedVersions) {
+                console.log('DEBUG: Preserving existing acceptedVersions:', currentFactsData.acceptedVersions);
+                data.acceptedVersions = currentFactsData.acceptedVersions;
+            } else {
+                console.log('DEBUG: No existing acceptedVersions to preserve');
+            }
+            
             currentFactsData = data;
+            console.log('DEBUG: Updated currentFactsData:', currentFactsData);
+            console.log('DEBUG: Updated acceptedVersions:', currentFactsData.acceptedVersions);
+            console.log('DEBUG: ========== Update complete ==========');
+            
             // Mark Step 1 fact extraction as complete
             step1Completion.factsExtracted = true;
             updateStep2Access();
@@ -1624,12 +1714,21 @@ function displayAcceptedDecisions() {
 }
 
 function displayConflicts(conflicts) {
+    console.log('DEBUG: ========== displayConflicts called ==========');
+    console.log('DEBUG: conflicts parameter:', conflicts);
+    console.log('DEBUG: conflicts length:', conflicts?.length);
+    console.log('DEBUG: currentFactsData exists:', !!currentFactsData);
+    console.log('DEBUG: currentFactsData.acceptedVersions:', currentFactsData?.acceptedVersions);
+    
     if (!conflicts || conflicts.length === 0) {
+        console.log('DEBUG: No conflicts to display');
         if (conflictsPanel) {
             conflictsPanel.style.display = 'none';
         }
         return;
     }
+    
+    console.log('DEBUG: Displaying', conflicts.length, 'conflicts');
     
     if (conflictsPanel) {
         conflictsPanel.style.display = 'block';
@@ -1639,6 +1738,9 @@ function displayConflicts(conflicts) {
     }
     
     conflicts.forEach((conflict, index) => {
+        console.log(`DEBUG: Processing conflict ${index}:`, conflict);
+        const acceptedVersion = currentFactsData?.acceptedVersions?.[String(index)] || currentFactsData?.acceptedVersions?.[index];
+        console.log(`DEBUG: Conflict ${index} accepted version:`, acceptedVersion);
         const conflictDiv = document.createElement('div');
         conflictDiv.className = 'conflict-item';
         conflictDiv.setAttribute('data-conflict-index', index);
@@ -1740,27 +1842,84 @@ function displayConflicts(conflicts) {
 }
 
 function acceptConflictVersion(conflictIndex, variantIndex, acceptedValue) {
+    console.log('DEBUG: ========== acceptConflictVersion called ==========');
+    console.log('DEBUG: Parameters:', { 
+        conflictIndex, 
+        conflictIndexType: typeof conflictIndex,
+        variantIndex, 
+        variantIndexType: typeof variantIndex,
+        acceptedValue 
+    });
+    
     if (!currentFactsData || !currentFactsData.conflicts) {
+        console.log('ERROR: No conflicts data available');
+        console.log('ERROR: currentFactsData:', currentFactsData);
         showError('No conflicts data available.');
         return;
     }
     
+    console.log('DEBUG: currentFactsData.conflicts length:', currentFactsData.conflicts.length);
+    console.log('DEBUG: conflictIndex:', conflictIndex, 'type:', typeof conflictIndex);
+    console.log('DEBUG: Checking if conflict exists at index:', conflictIndex);
+    
     const conflict = currentFactsData.conflicts[conflictIndex];
     if (!conflict) {
+        console.log('ERROR: Conflict not found at index', conflictIndex);
+        console.log('ERROR: Available conflict indices: 0 to', currentFactsData.conflicts.length - 1);
         showError('Conflict not found.');
         return;
     }
     
+    console.log('DEBUG: Conflict found:', conflict);
+    
     // Store accepted version
     // Convert conflictIndex to string for consistent key type (matching checkIfAllConflictsResolved)
+    console.log('DEBUG: acceptedVersions before:', currentFactsData.acceptedVersions);
+    console.log('DEBUG: acceptedVersions exists:', !!currentFactsData.acceptedVersions);
+    
     if (!currentFactsData.acceptedVersions) {
+        console.log('DEBUG: Initializing acceptedVersions object');
         currentFactsData.acceptedVersions = {};
     }
-    currentFactsData.acceptedVersions[String(conflictIndex)] = {
+    
+    const key = String(conflictIndex);
+    const keyNum = Number(conflictIndex);
+    console.log('DEBUG: Storing with key:', key, 'type:', typeof key);
+    console.log('DEBUG: Also trying numeric key:', keyNum, 'type:', typeof keyNum);
+    
+    const acceptedVersionData = {
         value: acceptedValue,
         variantIndex: variantIndex,
         timestamp: new Date().toISOString()
     };
+    
+    currentFactsData.acceptedVersions[key] = acceptedVersionData;
+    console.log('DEBUG: Stored accepted version with string key:', { 
+        key, 
+        keyType: typeof key,
+        storedValue: currentFactsData.acceptedVersions[key] 
+    });
+    
+    // Also store with numeric key for safety
+    currentFactsData.acceptedVersions[keyNum] = acceptedVersionData;
+    console.log('DEBUG: Also stored with numeric key:', { 
+        keyNum, 
+        keyNumType: typeof keyNum,
+        storedValue: currentFactsData.acceptedVersions[keyNum] 
+    });
+    
+    console.log('DEBUG: All acceptedVersions after store:', currentFactsData.acceptedVersions);
+    console.log('DEBUG: acceptedVersions JSON:', JSON.stringify(currentFactsData.acceptedVersions, null, 2));
+    console.log('DEBUG: acceptedVersions keys:', Object.keys(currentFactsData.acceptedVersions));
+    console.log('DEBUG: acceptedVersions entries:', Object.entries(currentFactsData.acceptedVersions));
+    
+    // Verify it was stored correctly
+    console.log('DEBUG: Verification - checking stored value:');
+    console.log('  - acceptedVersions["' + key + '"]:', currentFactsData.acceptedVersions[key]);
+    console.log('  - acceptedVersions[' + keyNum + ']:', currentFactsData.acceptedVersions[keyNum]);
+    console.log('  - "' + key + '" in acceptedVersions:', key in currentFactsData.acceptedVersions);
+    console.log('  - ' + keyNum + ' in acceptedVersions:', keyNum in currentFactsData.acceptedVersions);
+    console.log('DEBUG: ========== acceptConflictVersion storage complete ==========');
     
     // Update fact matrix with accepted value
     if (currentFactsData.facts && conflict.sources && conflict.conflicting_values) {
@@ -1879,9 +2038,19 @@ function acceptConflictVersion(conflictIndex, variantIndex, acceptedValue) {
     showSuccess(`Accepted version: "${acceptedValue}" - Fact matrix updated.`);
     
     // Check if all conflicts are resolved
+    console.log('DEBUG: Checking if all conflicts resolved after accepting version');
+    console.log('LIABILITY_SIGNAL_LOG: [acceptVersion] Checking conflict resolution status...');
     const allResolved = checkIfAllConflictsResolved();
+    console.log('DEBUG: All conflicts resolved after accept:', allResolved);
+    console.log('LIABILITY_SIGNAL_LOG: [acceptVersion] All conflicts resolved:', allResolved);
     
     if (allResolved) {
+        console.log('LIABILITY_SIGNAL_LOG: [acceptVersion] ========== ALL CONFLICTS RESOLVED ==========');
+        console.log('LIABILITY_SIGNAL_LOG: [acceptVersion] Timestamp:', new Date().toISOString());
+        console.log('LIABILITY_SIGNAL_LOG: [acceptVersion] Current facts count:', currentFactsData?.facts?.length || 0);
+        console.log('LIABILITY_SIGNAL_LOG: [acceptVersion] Conflicts count:', currentFactsData?.conflicts?.length || 0);
+        console.log('LIABILITY_SIGNAL_LOG: [acceptVersion] Accepted versions count:', currentFactsData?.acceptedVersions ? Object.keys(currentFactsData.acceptedVersions).length : 0);
+        
         // Switch to resolved layout
         displayFactMatrix(currentFactsData);
         
@@ -1889,6 +2058,20 @@ function acceptConflictVersion(conflictIndex, variantIndex, acceptedValue) {
         updateStep2Access();
         updateStepIndicators();
         updateProgress();
+        
+        // Automatically trigger liability signal analysis immediately
+        console.log('LIABILITY_SIGNAL_LOG: [acceptVersion] Auto-triggering liability signal analysis...');
+        console.log('LIABILITY_SIGNAL_LOG: [acceptVersion] Current liability signals state:', {
+            step1Completion_liabilitySignals: step1Completion.liabilitySignals,
+            currentLiabilitySignalsData_exists: !!currentLiabilitySignalsData,
+            currentLiabilitySignalsData_signals_count: currentLiabilitySignalsData?.signals?.length || 0
+        });
+        
+        // Call analyzeLiabilitySignals immediately
+        setTimeout(() => {
+            console.log('LIABILITY_SIGNAL_LOG: [acceptVersion] Executing analyzeLiabilitySignals() after timeout...');
+            analyzeLiabilitySignals();
+        }, 100);
         
         // Show popup when all conflicts are resolved
         showAllConflictsResolvedPopup();
@@ -1899,12 +2082,30 @@ function acceptConflictVersion(conflictIndex, variantIndex, acceptedValue) {
 }
 
 function openConflictModal(conflictIndex, fact, factIndex) {
+    console.log('DEBUG: ========== openConflictModal called ==========');
+    console.log('DEBUG: Parameters:', { conflictIndex, conflictIndexType: typeof conflictIndex, factIndex });
+    console.log('DEBUG: currentFactsData exists:', !!currentFactsData);
+    console.log('DEBUG: currentFactsData.conflicts exists:', !!currentFactsData?.conflicts);
+    console.log('DEBUG: currentFactsData.conflicts length:', currentFactsData?.conflicts?.length);
+    console.log('DEBUG: currentFactsData.acceptedVersions:', currentFactsData?.acceptedVersions);
+    
     if (!currentFactsData || !currentFactsData.conflicts || !currentFactsData.conflicts[conflictIndex]) {
+        console.log('ERROR: Conflict not found at index', conflictIndex);
         showError('Conflict not found.');
         return;
     }
     
     const conflict = currentFactsData.conflicts[conflictIndex];
+    console.log('DEBUG: Conflict found:', conflict);
+    console.log('DEBUG: Conflict index:', conflictIndex);
+    
+    // Check if this conflict has an accepted version
+    const acceptedVersionStr = currentFactsData.acceptedVersions?.[String(conflictIndex)];
+    const acceptedVersionNum = currentFactsData.acceptedVersions?.[Number(conflictIndex)];
+    const acceptedVersion = acceptedVersionStr || acceptedVersionNum;
+    console.log('DEBUG: Accepted version for conflict', conflictIndex, ':', acceptedVersion);
+    console.log('DEBUG: Accepted version (string key):', acceptedVersionStr);
+    console.log('DEBUG: Accepted version (numeric key):', acceptedVersionNum);
     const modal = document.getElementById('conflictModal');
     const modalBody = document.getElementById('conflictModalBody');
     
@@ -2109,13 +2310,20 @@ function showResolvedConflictDetails(conflictIndex, fact, factIndex) {
 }
 
 function showAllConflictsResolvedPopup() {
+    console.log('LIABILITY_SIGNAL_LOG: [showAllConflictsResolvedPopup] Showing popup for all conflicts resolved');
+    console.log('LIABILITY_SIGNAL_LOG: [showAllConflictsResolvedPopup] Timestamp:', new Date().toISOString());
+    
     const modal = document.getElementById('conflictModal');
     const modalBody = document.getElementById('conflictModalBody');
     
     if (!modal || !modalBody) {
+        console.error('LIABILITY_SIGNAL_LOG: [showAllConflictsResolvedPopup] ERROR: Modal elements not found');
         showError('Modal elements not found.');
         return;
     }
+    
+    console.log('LIABILITY_SIGNAL_LOG: [showAllConflictsResolvedPopup] Modal elements found, building popup content');
+    console.log('LIABILITY_SIGNAL_LOG: [showAllConflictsResolvedPopup] Liability signal call should have been auto-triggered');
     
     // Build modal content
     modalBody.innerHTML = `
@@ -2135,25 +2343,40 @@ function showAllConflictsResolvedPopup() {
     
     // Show modal
     modal.style.display = 'block';
+    console.log('LIABILITY_SIGNAL_LOG: [showAllConflictsResolvedPopup] Popup displayed');
     
     // Store flag to indicate this is the all-conflicts-resolved popup
     modal.dataset.allConflictsResolved = 'true';
+    console.log('LIABILITY_SIGNAL_LOG: [showAllConflictsResolvedPopup] Popup flag set');
 }
 
 function closeAllConflictsResolvedPopup() {
+    console.log('LIABILITY_SIGNAL_LOG: [closeAllConflictsResolvedPopup] Closing popup');
+    console.log('LIABILITY_SIGNAL_LOG: [closeAllConflictsResolvedPopup] Timestamp:', new Date().toISOString());
+    
     const modal = document.getElementById('conflictModal');
     if (modal) {
         modal.style.display = 'none';
         delete modal.dataset.allConflictsResolved;
+        console.log('LIABILITY_SIGNAL_LOG: [closeAllConflictsResolvedPopup] Modal closed and flag removed');
     }
+    
+    // Check current state before deciding whether to call analyzeLiabilitySignals
+    console.log('LIABILITY_SIGNAL_LOG: [closeAllConflictsResolvedPopup] Checking liability signals state:');
+    console.log('LIABILITY_SIGNAL_LOG: [closeAllConflictsResolvedPopup] - step1Completion.liabilitySignals:', step1Completion.liabilitySignals);
+    console.log('LIABILITY_SIGNAL_LOG: [closeAllConflictsResolvedPopup] - currentLiabilitySignalsData exists:', !!currentLiabilitySignalsData);
+    console.log('LIABILITY_SIGNAL_LOG: [closeAllConflictsResolvedPopup] - currentLiabilitySignalsData signals count:', currentLiabilitySignalsData?.signals?.length || 0);
     
     // If liability signals haven't been analyzed yet, analyze them now
     if (!step1Completion.liabilitySignals || !currentLiabilitySignalsData) {
+        console.log('LIABILITY_SIGNAL_LOG: [closeAllConflictsResolvedPopup] Liability signals not analyzed yet, will trigger analysis');
         // Automatically analyze liability signals
         setTimeout(() => {
+            console.log('LIABILITY_SIGNAL_LOG: [closeAllConflictsResolvedPopup] Executing analyzeLiabilitySignals() after timeout (500ms)...');
             analyzeLiabilitySignals();
         }, 500);
     } else {
+        console.log('LIABILITY_SIGNAL_LOG: [closeAllConflictsResolvedPopup] Liability signals already exist, re-analyzing to reflect updated facts');
         // Re-analyze liability signals if they exist (to reflect updated facts)
         analyzeLiabilitySignals();
     }
@@ -2385,24 +2608,56 @@ function escapeHtml(text) {
 
 
 function analyzeLiabilitySignals() {
+    const timestamp = new Date().toISOString();
+    console.log('LIABILITY_SIGNAL_LOG: [analyzeLiabilitySignals] ========== ENTRY POINT ==========');
+    console.log('LIABILITY_SIGNAL_LOG: [analyzeLiabilitySignals] Timestamp:', timestamp);
+    console.log('LIABILITY_SIGNAL_LOG: [analyzeLiabilitySignals] Function called from:', new Error().stack?.split('\n')[2]?.trim() || 'unknown');
+    
     // Check if fact matrix exists
+    console.log('LIABILITY_SIGNAL_LOG: [analyzeLiabilitySignals] Validating facts data...');
+    console.log('LIABILITY_SIGNAL_LOG: [analyzeLiabilitySignals] - currentFactsData exists:', !!currentFactsData);
+    console.log('LIABILITY_SIGNAL_LOG: [analyzeLiabilitySignals] - currentFactsData.facts exists:', !!currentFactsData?.facts);
+    console.log('LIABILITY_SIGNAL_LOG: [analyzeLiabilitySignals] - currentFactsData.facts length:', currentFactsData?.facts?.length || 0);
+    
     if (!currentFactsData || !currentFactsData.facts || currentFactsData.facts.length === 0) {
+        console.error('LIABILITY_SIGNAL_LOG: [analyzeLiabilitySignals] ERROR: No facts data available');
         showError('Please extract facts first before analyzing liability signals.');
         return;
     }
     
+    console.log('LIABILITY_SIGNAL_LOG: [analyzeLiabilitySignals] Facts validation passed');
+    
     // Switch to Fact Matrix tab (if not already there)
+    console.log('LIABILITY_SIGNAL_LOG: [analyzeLiabilitySignals] Switching to fact-matrix tab');
     switchTab('fact-matrix');
     
-    // Show "Processing..." in liability columns immediately
+    // Ensure table is visible (don't hide it with loading indicator)
+    const factTable = document.getElementById('factTable');
+    if (factTable) {
+        factTable.style.display = 'table';
+    }
+    
+    // Show "Processing..." in liability columns immediately (don't replace table)
     showProcessingInLiabilityColumns();
     
     error.style.display = 'none';
     
     // Prepare facts data to send
     const factsData = currentFactsData.facts;
+    console.log('LIABILITY_SIGNAL_LOG: [analyzeLiabilitySignals] Preparing request data:');
+    console.log('LIABILITY_SIGNAL_LOG: [analyzeLiabilitySignals] - Facts count:', factsData.length);
+    console.log('LIABILITY_SIGNAL_LOG: [analyzeLiabilitySignals] - Facts sample (first 2):', factsData.slice(0, 2).map(f => ({
+        category: f.category,
+        source: f.source,
+        extracted_fact: f.extracted_fact?.substring(0, 50) + '...'
+    })));
     
     // Send to backend
+    console.log('LIABILITY_SIGNAL_LOG: [analyzeLiabilitySignals] Initiating API call to /analyze-liability-signals');
+    console.log('LIABILITY_SIGNAL_LOG: [analyzeLiabilitySignals] Request method: POST');
+    console.log('LIABILITY_SIGNAL_LOG: [analyzeLiabilitySignals] Request body size:', JSON.stringify({ facts: factsData }).length, 'bytes');
+    
+    const requestStartTime = Date.now();
     fetch('/analyze-liability-signals', {
         method: 'POST',
         headers: {
@@ -2410,29 +2665,66 @@ function analyzeLiabilitySignals() {
         },
         body: JSON.stringify({ facts: factsData })
     })
-    .then(response => response.json())
+    .then(response => {
+        const requestDuration = Date.now() - requestStartTime;
+        console.log('LIABILITY_SIGNAL_LOG: [analyzeLiabilitySignals] API response received');
+        console.log('LIABILITY_SIGNAL_LOG: [analyzeLiabilitySignals] - Status:', response.status, response.statusText);
+        console.log('LIABILITY_SIGNAL_LOG: [analyzeLiabilitySignals] - Request duration:', requestDuration, 'ms');
+        console.log('LIABILITY_SIGNAL_LOG: [analyzeLiabilitySignals] - Response headers:', Object.fromEntries(response.headers.entries()));
+        return response.json();
+    })
     .then(data => {
-        hideTabLoading('factMatrix');
+        console.log('LIABILITY_SIGNAL_LOG: [analyzeLiabilitySignals] Response data parsed');
+        console.log('LIABILITY_SIGNAL_LOG: [analyzeLiabilitySignals] - Has error:', !!data.error);
+        console.log('LIABILITY_SIGNAL_LOG: [analyzeLiabilitySignals] - Has signals:', !!data.signals);
+        console.log('LIABILITY_SIGNAL_LOG: [analyzeLiabilitySignals] - Signals count:', data.signals?.length || 0);
         
         if (data.error) {
+            console.error('LIABILITY_SIGNAL_LOG: [analyzeLiabilitySignals] ERROR from server:', data.error);
+            clearProcessingFromLiabilityColumns();
             showError(data.error);
         } else if (data.signals) {
+            console.log('LIABILITY_SIGNAL_LOG: [analyzeLiabilitySignals] Success! Processing signals data...');
+            console.log('LIABILITY_SIGNAL_LOG: [analyzeLiabilitySignals] - Signals sample:', data.signals.slice(0, 2).map(s => ({
+                signal_type: s.signal_type,
+                severity_score: s.severity_score
+            })));
+            
             // Store signals data
             currentLiabilitySignalsData = data;
+            console.log('LIABILITY_SIGNAL_LOG: [analyzeLiabilitySignals] Stored signals data in currentLiabilitySignalsData');
+            
             // Mark Step 1 liability signals as complete
             step1Completion.liabilitySignals = true;
+            console.log('LIABILITY_SIGNAL_LOG: [analyzeLiabilitySignals] Marked step1Completion.liabilitySignals = true');
+            
             updateStep2Access();
             updateStepIndicators();
             updateProgress();
+            console.log('LIABILITY_SIGNAL_LOG: [analyzeLiabilitySignals] Updated step access, indicators, and progress');
+            
             // Display liability signals (will update fact table)
             displayLiabilitySignals(data);
+            console.log('LIABILITY_SIGNAL_LOG: [analyzeLiabilitySignals] Displayed liability signals');
+            
             showSuccess('Facts extracted and liability signals analyzed successfully.');
+            console.log('LIABILITY_SIGNAL_LOG: [analyzeLiabilitySignals] ========== SUCCESS COMPLETE ==========');
         } else {
+            console.error('LIABILITY_SIGNAL_LOG: [analyzeLiabilitySignals] ERROR: No signals in response');
+            console.log('LIABILITY_SIGNAL_LOG: [analyzeLiabilitySignals] Response data:', data);
+            clearProcessingFromLiabilityColumns();
             showError('No signals received from server.');
         }
     })
     .catch(err => {
-        hideTabLoading('factMatrix');
+        const requestDuration = Date.now() - requestStartTime;
+        console.error('LIABILITY_SIGNAL_LOG: [analyzeLiabilitySignals] ========== ERROR ==========');
+        console.error('LIABILITY_SIGNAL_LOG: [analyzeLiabilitySignals] Request duration before error:', requestDuration, 'ms');
+        console.error('LIABILITY_SIGNAL_LOG: [analyzeLiabilitySignals] Error object:', err);
+        console.error('LIABILITY_SIGNAL_LOG: [analyzeLiabilitySignals] Error message:', err.message);
+        console.error('LIABILITY_SIGNAL_LOG: [analyzeLiabilitySignals] Error stack:', err.stack);
+        
+        clearProcessingFromLiabilityColumns();
         showError('Failed to analyze liability signals. Please try again.');
         console.error('Error:', err);
     });
@@ -2466,17 +2758,117 @@ function showProcessingInLiabilityColumns() {
     });
 }
 
+function clearProcessingFromLiabilityColumns() {
+    // Clear "Processing..." from all liability columns (show empty or dash)
+    const allRows = factTableBody.querySelectorAll('tr');
+    allRows.forEach((row, index) => {
+        const signalTypeCell = row.querySelector('.liability-signal-type-cell');
+        const impactCell = row.querySelector('.liability-impact-cell');
+        const severityCell = row.querySelector('.liability-severity-cell');
+        
+        if (signalTypeCell && signalTypeCell.innerHTML.includes('Processing...')) {
+            signalTypeCell.textContent = '—';
+        }
+        if (impactCell && impactCell.innerHTML.includes('Processing...')) {
+            impactCell.textContent = '—';
+        }
+        if (severityCell && severityCell.innerHTML.includes('Processing...')) {
+            severityCell.textContent = '—';
+        }
+    });
+}
+
 function checkIfAllConflictsResolved() {
-    if (!currentFactsData || !currentFactsData.conflicts || currentFactsData.conflicts.length === 0) {
-        // No conflicts, so technically all are resolved
+    const timestamp = new Date().toISOString();
+    console.log('LIABILITY_SIGNAL_LOG: [checkIfAllConflictsResolved] ========== CHECKING CONFLICT RESOLUTION ==========');
+    console.log('LIABILITY_SIGNAL_LOG: [checkIfAllConflictsResolved] Timestamp:', timestamp);
+    console.log('DEBUG: checkIfAllConflictsResolved called');
+    console.log('DEBUG: currentFactsData exists:', !!currentFactsData);
+    
+    if (!currentFactsData) {
+        console.log('LIABILITY_SIGNAL_LOG: [checkIfAllConflictsResolved] No currentFactsData - returning true (no conflicts)');
+        console.log('DEBUG: currentFactsData is null/undefined');
+        return true; // No data means no conflicts
+    }
+    
+    console.log('LIABILITY_SIGNAL_LOG: [checkIfAllConflictsResolved] currentFactsData exists, checking conflicts...');
+    console.log('DEBUG: currentFactsData.conflicts exists:', !!currentFactsData.conflicts);
+    console.log('DEBUG: currentFactsData.conflicts type:', typeof currentFactsData.conflicts);
+    console.log('DEBUG: currentFactsData.conflicts is array:', Array.isArray(currentFactsData.conflicts));
+    
+    if (!currentFactsData.conflicts || currentFactsData.conflicts.length === 0) {
+        console.log('LIABILITY_SIGNAL_LOG: [checkIfAllConflictsResolved] No conflicts found - ALL RESOLVED');
+        console.log('DEBUG: No conflicts found, all resolved');
         return true;
     }
     
+    const conflictsCount = currentFactsData.conflicts.length;
+    console.log(`LIABILITY_SIGNAL_LOG: [checkIfAllConflictsResolved] Found ${conflictsCount} conflicts to check`);
+    console.log(`DEBUG: Found ${conflictsCount} conflicts`);
+    console.log('DEBUG: Full conflicts array:', JSON.stringify(currentFactsData.conflicts, null, 2));
+    console.log('DEBUG: acceptedVersions exists:', !!currentFactsData.acceptedVersions);
+    console.log('DEBUG: acceptedVersions type:', typeof currentFactsData.acceptedVersions);
+    console.log('DEBUG: acceptedVersions:', currentFactsData.acceptedVersions);
+    console.log('DEBUG: acceptedVersions JSON:', JSON.stringify(currentFactsData.acceptedVersions, null, 2));
+    
+    if (!currentFactsData.acceptedVersions) {
+        console.log('LIABILITY_SIGNAL_LOG: [checkIfAllConflictsResolved] No acceptedVersions object - NOT ALL RESOLVED');
+        console.log('DEBUG: acceptedVersions object does not exist');
+        console.log('DEBUG: currentFactsData keys:', Object.keys(currentFactsData));
+        return false;
+    }
+    
+    const acceptedVersionsCount = Object.keys(currentFactsData.acceptedVersions).length;
+    console.log(`LIABILITY_SIGNAL_LOG: [checkIfAllConflictsResolved] Found ${acceptedVersionsCount} accepted versions`);
+    console.log('DEBUG: acceptedVersions keys:', Object.keys(currentFactsData.acceptedVersions));
+    console.log('DEBUG: acceptedVersions keys types:', Object.keys(currentFactsData.acceptedVersions).map(k => `${k} (${typeof k})`));
+    console.log('DEBUG: acceptedVersions entries:', Object.entries(currentFactsData.acceptedVersions));
+    
     // Check if all conflicts have accepted versions
     // Use String(idx) to ensure consistent key type matching (acceptedVersions keys are stored as strings)
-    return currentFactsData.conflicts.every((c, idx) => 
-        currentFactsData.acceptedVersions && currentFactsData.acceptedVersions[String(idx)]
-    );
+    const allResolved = currentFactsData.conflicts.every((c, idx) => {
+        const key = String(idx);
+        const keyNum = idx;
+        const keyStr = String(idx);
+        
+        console.log(`LIABILITY_SIGNAL_LOG: [checkIfAllConflictsResolved] Checking conflict ${idx}/${conflictsCount - 1}:`);
+        console.log(`DEBUG: Checking conflict ${idx}:`);
+        console.log(`  - key (String(idx)): "${key}" (type: ${typeof key})`);
+        console.log(`  - keyNum: ${keyNum} (type: ${typeof keyNum})`);
+        console.log(`  - keyStr: "${keyStr}" (type: ${typeof keyStr})`);
+        console.log(`  - conflict object:`, c);
+        
+        // Try multiple key formats
+        const hasAcceptedStr = currentFactsData.acceptedVersions && currentFactsData.acceptedVersions[keyStr];
+        const hasAcceptedNum = currentFactsData.acceptedVersions && currentFactsData.acceptedVersions[keyNum];
+        const hasAccepted = hasAcceptedStr || hasAcceptedNum;
+        
+        console.log(`  - acceptedVersions["${keyStr}"]:`, hasAcceptedStr);
+        console.log(`  - acceptedVersions[${keyNum}]:`, hasAcceptedNum);
+        console.log(`  - hasAccepted (combined):`, !!hasAccepted);
+        
+        if (!hasAccepted) {
+            console.log(`LIABILITY_SIGNAL_LOG: [checkIfAllConflictsResolved] Conflict ${idx} MISSING accepted version`);
+            console.log(`DEBUG: Conflict ${idx} missing accepted version.`);
+            console.log(`  - Available keys:`, Object.keys(currentFactsData.acceptedVersions));
+            console.log(`  - Available keys with types:`, Object.keys(currentFactsData.acceptedVersions).map(k => `"${k}" (${typeof k})`));
+            console.log(`  - Checking if key exists with different format...`);
+            console.log(`  - Has key "${keyStr}":`, keyStr in currentFactsData.acceptedVersions);
+            console.log(`  - Has key ${keyNum}:`, keyNum in currentFactsData.acceptedVersions);
+            console.log(`  - All acceptedVersions entries:`, Object.entries(currentFactsData.acceptedVersions));
+        } else {
+            console.log(`LIABILITY_SIGNAL_LOG: [checkIfAllConflictsResolved] Conflict ${idx} HAS accepted version`);
+            console.log(`  - Accepted version found:`, hasAcceptedStr || hasAcceptedNum);
+        }
+        
+        return hasAccepted;
+    });
+    
+    console.log(`LIABILITY_SIGNAL_LOG: [checkIfAllConflictsResolved] ========== RESULT: ${allResolved ? 'ALL RESOLVED' : 'NOT ALL RESOLVED'} ==========`);
+    console.log(`LIABILITY_SIGNAL_LOG: [checkIfAllConflictsResolved] Conflicts: ${conflictsCount}, Accepted: ${acceptedVersionsCount}, All Resolved: ${allResolved}`);
+    console.log(`DEBUG: All conflicts resolved: ${allResolved}`);
+    console.log(`DEBUG: Final check result: ${allResolved}`);
+    return allResolved;
 }
 
 function updateLiabilityColumns(signalsData) {
@@ -3107,12 +3499,10 @@ function displayTimeline(timelineData) {
     // Switch to Timeline tab, but skip loading from localStorage since we're displaying a newly generated timeline
     switchTab('timeline', true);
     
-    // Hide empty state, show timeline container
-    const emptyState = document.getElementById('timelineEmptyState');
+    // Show timeline container
     const timelineContainer = document.getElementById('timelineEventsContainer');
     const saveButton = document.getElementById('saveTimelineButton');
     
-    if (emptyState) emptyState.style.display = 'none';
     if (timelineContainer) timelineContainer.style.display = 'block';
     if (saveButton) saveButton.style.display = 'inline-flex';
     
@@ -3314,7 +3704,6 @@ function loadTimeline() {
 }
 
 function showTimelineEmptyState() {
-    const emptyState = document.getElementById('timelineEmptyState');
     const timelineContainer = document.getElementById('timelineEventsContainer');
     const saveButton = document.getElementById('saveTimelineButton');
     const loadingDiv = document.getElementById('timelineLoading');
@@ -3322,7 +3711,6 @@ function showTimelineEmptyState() {
     if (loadingDiv) loadingDiv.style.display = 'none';
     if (timelineContainer) timelineContainer.style.display = 'none';
     if (saveButton) saveButton.style.display = 'none';
-    if (emptyState) emptyState.style.display = 'block';
 }
 
 function generateClaimRationale() {
@@ -3338,9 +3726,18 @@ function generateClaimRationale() {
         return;
     }
     
+    // Switch to claim rationale tab to show loading indicator
+    switchTab('claim-rationale');
+    
     // Show loading state
-    loading.style.display = 'block';
+    showTabLoading('claimRationale', 'Generating claim rationale...');
     error.style.display = 'none';
+    
+    // Hide empty state and rationale display while loading
+    const emptyState = document.getElementById('rationaleEmptyState');
+    const display = document.getElementById('rationaleDisplay');
+    if (emptyState) emptyState.style.display = 'none';
+    if (display) display.style.display = 'none';
     
     // Prepare facts, signals, and files data to send
     const factsData = currentFactsData.facts;
@@ -3357,7 +3754,7 @@ function generateClaimRationale() {
     })
     .then(response => response.json())
     .then(data => {
-        loading.style.display = 'none';
+        hideTabLoading('claimRationale');
         
         if (data.error) {
             showError(data.error);
@@ -3373,7 +3770,7 @@ function generateClaimRationale() {
         }
     })
     .catch(err => {
-        loading.style.display = 'none';
+        hideTabLoading('claimRationale');
         showError('Failed to generate claim rationale. Please try again.');
         console.error('Error:', err);
     });
@@ -3784,13 +4181,15 @@ function updateSupervisorEscalationButton() {
     if (isEscalatedToSupervisor) {
         supervisorButton.disabled = true;
         supervisorButton.textContent = 'Escalated to Supervisor';
-        supervisorButton.style.opacity = '0.6';
-        supervisorButton.style.cursor = 'not-allowed';
+        // Remove inline styles to let CSS handle disabled state
+        supervisorButton.style.opacity = '';
+        supervisorButton.style.cursor = '';
     } else {
         supervisorButton.disabled = false;
         supervisorButton.textContent = 'Supervisor Escalation';
-        supervisorButton.style.opacity = '1';
-        supervisorButton.style.cursor = 'pointer';
+        // Remove inline styles to let CSS handle normal state
+        supervisorButton.style.opacity = '';
+        supervisorButton.style.cursor = '';
     }
 }
 
@@ -4404,6 +4803,13 @@ function openEmailRequestModal() {
     
     // Show modal
     modal.style.display = 'block';
+}
+
+function closeFileViewModal() {
+    const modal = document.getElementById('fileViewModal');
+    if (modal) {
+        modal.style.display = 'none';
+    }
 }
 
 function closeEmailRequestModal() {

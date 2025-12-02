@@ -2,7 +2,7 @@
 .upload-button {
     display: inline-block;
     padding: 8px 20px;
-    background: #333;
+    background: #14b8a6;
     color: white;
     border-radius: 4px;
     font-weight: 500;
@@ -11,12 +11,12 @@
 }
 
 .upload-button:hover {
-    background: #555;
+    background: #0d9488;
 }
 
 .summary-button {
     padding: 8px 16px;
-    background: #333;
+    background: #14b8a6;
     color: white;
     border: none;
     border-radius: 3px;
@@ -29,7 +29,7 @@
 }
 
 .summary-button:hover:not(:disabled) {
-    background: #555;
+    background: #0d9488;
 }
 
 .summary-button:disabled {
@@ -39,7 +39,7 @@
 
 .upload-btn {
     padding: 8px 16px;
-    background: #333;
+    background: #14b8a6;
     color: white;
     border: none;
     border-radius: 3px;
@@ -49,7 +49,7 @@
 }
 
 .upload-btn:hover {
-    background: #555;
+    background: #0d9488;
 }
 
 .upload-btn:active {
@@ -84,7 +84,7 @@
 
 .update-button {
     padding: 8px 16px;
-    background: #333;
+    background: #14b8a6;
     color: white;
     border: none;
     border-radius: 3px;
@@ -94,12 +94,12 @@
 }
 
 .update-button:hover {
-    background: #555;
+    background: #0d9488;
 }
 
 .export-button {
     padding: 8px 16px;
-    background: #333;
+    background: #14b8a6;
     color: white;
     border: none;
     border-radius: 3px;
@@ -109,13 +109,13 @@
 }
 
 .export-button:hover {
-    background: #555;
+    background: #0d9488;
 }
 
 .accept-button {
     margin-top: 12px;
     padding: 8px 16px;
-    background: #4caf50;
+    background: #14b8a6;
     color: white;
     border: none;
     border-radius: 6px;
@@ -126,7 +126,7 @@
 }
 
 .accept-button:hover:not(:disabled) {
-    background: #45a049;
+    background: #0d9488;
 }
 
 .accept-button:disabled {
@@ -137,7 +137,7 @@
 .accept-button-small {
     margin-left: 10px;
     padding: 4px 10px;
-    background: #4caf50;
+    background: #14b8a6;
     color: white;
     border: none;
     border-radius: 4px;
@@ -147,7 +147,7 @@
 }
 
 .accept-button-small:hover:not(:disabled) {
-    background: #45a049;
+    background: #0d9488;
 }
 
 .accept-button-small:disabled {
@@ -169,7 +169,7 @@
 }
 
 .event-control-btn:hover:not(:disabled) {
-    background: #667eea;
+    background: #14b8a6;
     color: white;
     transform: translateY(-1px);
 }
@@ -192,12 +192,12 @@
 }
 
 .modal-button-primary {
-    background: #667eea;
+    background: #14b8a6;
     color: white;
 }
 
 .modal-button-primary:hover {
-    background: #5568d3;
+    background: #0d9488;
 }
 
 .modal-button-secondary {

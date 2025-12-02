@@ -1603,18 +1603,47 @@ def generate_summary():
 @app.route('/analyze-liability-signals', methods=['POST'])
 def analyze_liability_signals():
     """Analyze fact matrix to identify liability signals using OpenAI."""
+    request_start_time = time.time()
+    request_timestamp = datetime.now().isoformat()
+    
+    logger.info("=" * 80)
+    logger.info("LIABILITY_SIGNAL_LOG: [analyze_liability_signals] ========== REQUEST RECEIVED ==========")
+    logger.info(f"LIABILITY_SIGNAL_LOG: [analyze_liability_signals] Timestamp: {request_timestamp}")
+    logger.info(f"LIABILITY_SIGNAL_LOG: [analyze_liability_signals] Request method: {request.method}")
+    logger.info(f"LIABILITY_SIGNAL_LOG: [analyze_liability_signals] Request path: {request.path}")
+    
     try:
+        # Check OpenAI client
+        logger.info("LIABILITY_SIGNAL_LOG: [analyze_liability_signals] Checking OpenAI client configuration...")
         if not openai_client:
+            logger.error("LIABILITY_SIGNAL_LOG: [analyze_liability_signals] ERROR: OpenAI API key not configured")
             return jsonify({'error': 'OpenAI API key not configured. Please set OPENAI_API_KEY in your environment.'}), 500
+        logger.info("LIABILITY_SIGNAL_LOG: [analyze_liability_signals] OpenAI client configured")
         
         # Get fact matrix data from request
+        logger.info("LIABILITY_SIGNAL_LOG: [analyze_liability_signals] Parsing request JSON...")
         request_data = request.json
         facts = request_data.get('facts', [])
         
+        logger.info(f"LIABILITY_SIGNAL_LOG: [analyze_liability_signals] Request data received:")
+        logger.info(f"LIABILITY_SIGNAL_LOG: [analyze_liability_signals] - Facts count: {len(facts) if facts else 0}")
+        logger.info(f"LIABILITY_SIGNAL_LOG: [analyze_liability_signals] - Request data keys: {list(request_data.keys()) if request_data else 'None'}")
+        
         if not facts:
+            logger.error("LIABILITY_SIGNAL_LOG: [analyze_liability_signals] ERROR: No facts provided in request")
             return jsonify({'error': 'No facts provided. Please extract facts first.'}), 400
         
+        logger.info("LIABILITY_SIGNAL_LOG: [analyze_liability_signals] Facts validation passed")
+        
+        # Log sample facts for debugging
+        if len(facts) > 0:
+            sample_facts = facts[:3]  # First 3 facts
+            logger.info(f"LIABILITY_SIGNAL_LOG: [analyze_liability_signals] Sample facts (first 3):")
+            for idx, fact in enumerate(sample_facts):
+                logger.info(f"LIABILITY_SIGNAL_LOG: [analyze_liability_signals]   Fact {idx + 1}: category={fact.get('category', 'N/A')}, source={fact.get('source', 'N/A')}, extracted_fact={fact.get('extracted_fact', 'N/A')[:50]}...")
+        
         # Build system prompt for liability signal detection
+        logger.info("LIABILITY_SIGNAL_LOG: [analyze_liability_signals] Building system prompt...")
         system_prompt = """You are an expert liability analyst specializing in auto insurance claims. Your task is to identify and analyze liability signals from a fact matrix extracted from claim documents.
 
 Your responsibilities:
@@ -1656,6 +1685,7 @@ Return your response as a JSON object with this exact structure:
 Analyze the following fact matrix:"""
         
         # Format facts for the prompt
+        logger.info("LIABILITY_SIGNAL_LOG: [analyze_liability_signals] Formatting facts for prompt...")
         facts_text = "\n\nFact Matrix:\n"
         for idx, fact in enumerate(facts):
             facts_text += f"\nFact {idx + 1}:\n"
@@ -1667,7 +1697,20 @@ Analyze the following fact matrix:"""
             if fact.get('normalized_value'):
                 facts_text += f"  Normalized Value: {fact.get('normalized_value')}\n"
         
+        prompt_size = len(system_prompt) + len(facts_text)
+        logger.info(f"LIABILITY_SIGNAL_LOG: [analyze_liability_signals] Prompt prepared:")
+        logger.info(f"LIABILITY_SIGNAL_LOG: [analyze_liability_signals] - System prompt length: {len(system_prompt)} chars")
+        logger.info(f"LIABILITY_SIGNAL_LOG: [analyze_liability_signals] - Facts text length: {len(facts_text)} chars")
+        logger.info(f"LIABILITY_SIGNAL_LOG: [analyze_liability_signals] - Total prompt size: {prompt_size} chars")
+        
         # Call OpenAI API with JSON mode
+        logger.info("LIABILITY_SIGNAL_LOG: [analyze_liability_signals] Initiating OpenAI API call...")
+        logger.info(f"LIABILITY_SIGNAL_LOG: [analyze_liability_signals] - Max tokens: 4000")
+        logger.info(f"LIABILITY_SIGNAL_LOG: [analyze_liability_signals] - Temperature: 0.0")
+        logger.info(f"LIABILITY_SIGNAL_LOG: [analyze_liability_signals] - Timeout: 120 seconds")
+        logger.info(f"LIABILITY_SIGNAL_LOG: [analyze_liability_signals] - Response format: json_object")
+        
+        api_call_start_time = time.time()
         try:
             response = call_openai_api(
                 system_prompt=system_prompt,
@@ -1678,12 +1721,34 @@ Analyze the following fact matrix:"""
                 timeout=120
             )
             
+            api_call_duration = time.time() - api_call_start_time
+            logger.info(f"LIABILITY_SIGNAL_LOG: [analyze_liability_signals] OpenAI API call completed")
+            logger.info(f"LIABILITY_SIGNAL_LOG: [analyze_liability_signals] - API call duration: {api_call_duration:.2f} seconds")
+            logger.info(f"LIABILITY_SIGNAL_LOG: [analyze_liability_signals] - Response received")
+            
             response_text = response.choices[0].message.content
+            logger.info(f"LIABILITY_SIGNAL_LOG: [analyze_liability_signals] Response text length: {len(response_text)} chars")
+            logger.info(f"LIABILITY_SIGNAL_LOG: [analyze_liability_signals] Response text preview (first 200 chars): {response_text[:200]}...")
             
             # Parse JSON response
+            logger.info("LIABILITY_SIGNAL_LOG: [analyze_liability_signals] Parsing JSON response...")
             try:
                 result = json.loads(response_text)
                 signals = result.get('signals', [])
+                
+                logger.info(f"LIABILITY_SIGNAL_LOG: [analyze_liability_signals] JSON parsed successfully")
+                logger.info(f"LIABILITY_SIGNAL_LOG: [analyze_liability_signals] - Signals count: {len(signals)}")
+                
+                if len(signals) > 0:
+                    logger.info(f"LIABILITY_SIGNAL_LOG: [analyze_liability_signals] Sample signals (first 3):")
+                    for idx, signal in enumerate(signals[:3]):
+                        logger.info(f"LIABILITY_SIGNAL_LOG: [analyze_liability_signals]   Signal {idx + 1}: type={signal.get('signal_type', 'N/A')}, severity={signal.get('severity_score', 'N/A')}")
+                
+                total_duration = time.time() - request_start_time
+                logger.info(f"LIABILITY_SIGNAL_LOG: [analyze_liability_signals] ========== SUCCESS ==========")
+                logger.info(f"LIABILITY_SIGNAL_LOG: [analyze_liability_signals] Total request duration: {total_duration:.2f} seconds")
+                logger.info(f"LIABILITY_SIGNAL_LOG: [analyze_liability_signals] Returning {len(signals)} signals")
+                logger.info("=" * 80)
                 
                 return jsonify({
                     'signals': signals,
@@ -1691,22 +1756,49 @@ Analyze the following fact matrix:"""
                 }), 200
             
             except json.JSONDecodeError as e:
+                logger.error(f"LIABILITY_SIGNAL_LOG: [analyze_liability_signals] JSON decode error: {str(e)}")
+                logger.error(f"LIABILITY_SIGNAL_LOG: [analyze_liability_signals] Attempting fallback JSON extraction...")
                 # Fallback: try to extract JSON from response
                 json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
                 if json_match:
+                    logger.info("LIABILITY_SIGNAL_LOG: [analyze_liability_signals] JSON pattern found, parsing...")
                     result = json.loads(json_match.group())
                     signals = result.get('signals', [])
+                    logger.info(f"LIABILITY_SIGNAL_LOG: [analyze_liability_signals] Fallback parsing successful, signals count: {len(signals)}")
+                    
+                    total_duration = time.time() - request_start_time
+                    logger.info(f"LIABILITY_SIGNAL_LOG: [analyze_liability_signals] ========== SUCCESS (fallback) ==========")
+                    logger.info(f"LIABILITY_SIGNAL_LOG: [analyze_liability_signals] Total request duration: {total_duration:.2f} seconds")
+                    logger.info("=" * 80)
+                    
                     return jsonify({
                         'signals': signals,
                         'success': True
                     }), 200
                 else:
+                    logger.error(f"LIABILITY_SIGNAL_LOG: [analyze_liability_signals] Failed to extract JSON from response")
                     raise Exception(f"Failed to parse JSON response: {str(e)}")
         
         except Exception as e:
+            api_call_duration = time.time() - api_call_start_time
+            total_duration = time.time() - request_start_time
+            logger.error("LIABILITY_SIGNAL_LOG: [analyze_liability_signals] ========== OPENAI API ERROR ==========")
+            logger.error(f"LIABILITY_SIGNAL_LOG: [analyze_liability_signals] Error type: {type(e).__name__}")
+            logger.error(f"LIABILITY_SIGNAL_LOG: [analyze_liability_signals] Error message: {str(e)}")
+            logger.error(f"LIABILITY_SIGNAL_LOG: [analyze_liability_signals] API call duration before error: {api_call_duration:.2f} seconds")
+            logger.error(f"LIABILITY_SIGNAL_LOG: [analyze_liability_signals] Total request duration: {total_duration:.2f} seconds")
+            logger.error("=" * 80)
             return jsonify({'error': f'OpenAI API error: {str(e)}'}), 500
     
     except Exception as e:
+        total_duration = time.time() - request_start_time
+        logger.error("LIABILITY_SIGNAL_LOG: [analyze_liability_signals] ========== GENERAL ERROR ==========")
+        logger.error(f"LIABILITY_SIGNAL_LOG: [analyze_liability_signals] Error type: {type(e).__name__}")
+        logger.error(f"LIABILITY_SIGNAL_LOG: [analyze_liability_signals] Error message: {str(e)}")
+        logger.error(f"LIABILITY_SIGNAL_LOG: [analyze_liability_signals] Total request duration: {total_duration:.2f} seconds")
+        import traceback
+        logger.error(f"LIABILITY_SIGNAL_LOG: [analyze_liability_signals] Traceback: {traceback.format_exc()}")
+        logger.error("=" * 80)
         return jsonify({'error': f'Liability signals analysis failed: {str(e)}'}), 500
 
 

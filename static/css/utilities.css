@@ -368,7 +368,7 @@
     width: 60px;
     height: 60px;
     border-radius: 50%;
-    background: #333;
+    background: #14b8a6;
     color: white;
     border: none;
     cursor: pointer;
@@ -381,7 +381,7 @@
 }
 
 .floating-upload-button:hover {
-    background: #555;
+    background: #0d9488;
     transform: translateY(-2px);
     box-shadow: 0 6px 16px rgba(0, 0, 0, 0.2);
 }

@@ -46,7 +46,7 @@
     max-width: 300px;
     margin: 0 auto;
     padding: 14px 24px;
-    background: #333;
+    background: #14b8a6;
     color: white;
     border: none;
     border-radius: 8px;
@@ -57,13 +57,13 @@
 }
 
 .big-upload-button:hover {
-    background: #555;
+    background: #0d9488;
     transform: translateY(-1px);
     box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
 }
 
 .big-upload-button:active {
-    background: #222;
+    background: #0f766e;
     transform: translateY(0);
 }
 
@@ -100,7 +100,7 @@
     align-items: center;
     gap: 6px;
     padding: 8px 16px;
-    background: #333;
+    background: #14b8a6;
     color: white;
     border: none;
     border-radius: 6px;
@@ -111,13 +111,13 @@
 }
 
 .small-upload-button:hover {
-    background: #555;
+    background: #0d9488;
     transform: translateY(-1px);
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
 }
 
 .small-upload-button:active {
-    background: #222;
+    background: #0f766e;
     transform: translateY(0);
 }
 

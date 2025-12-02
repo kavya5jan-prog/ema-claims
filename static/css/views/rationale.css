@@ -14,7 +14,46 @@
 .claim-rationale-actions {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.claim-rationale-actions .summary-button {
+    padding: 10px 20px;
+    background: #14b8a6;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    font-weight: 500;
+    cursor: pointer;
+    font-size: 0.9em;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+}
+
+.claim-rationale-actions .summary-button:hover:not(:disabled) {
+    background: #0d9488;
+    transform: translateY(-1px);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.claim-rationale-actions .summary-button:active:not(:disabled) {
+    transform: translateY(0);
+    box-shadow: none;
+}
+
+.claim-rationale-actions .summary-button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    background: #14b8a6;
+}
+
+.claim-rationale-actions .summary-button:focus {
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(20, 184, 166, 0.2);
 }
 
 .claim-rationale-header h2 {

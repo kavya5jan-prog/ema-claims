@@ -15,6 +15,14 @@ document.addEventListener('DOMContentLoaded', () => {
     loadTimeline();
 });
 
+// Logout handler
+function handleLogout() {
+    window.location.href = '/logout';
+}
+
+// Make handleLogout available globally
+window.handleLogout = handleLogout;
+
 // Export functions that might be called from HTML
 export { renderFileList, updateStep2Access };
 

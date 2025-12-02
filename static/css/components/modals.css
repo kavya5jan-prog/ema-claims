@@ -357,7 +357,7 @@
 
 .generate-draft-button {
     padding: 10px 20px;
-    background: #667eea;
+    background: #14b8a6;
     color: white;
     border: none;
     border-radius: 6px;
@@ -369,7 +369,7 @@
 }
 
 .generate-draft-button:hover {
-    background: #5568d3;
+    background: #0d9488;
 }
 
 .generate-draft-button:disabled {
@@ -387,12 +387,12 @@
 }
 
 .modal-button-primary {
-    background: #667eea;
+    background: #14b8a6;
     color: white;
 }
 
 .modal-button-primary:hover {
-    background: #5568d3;
+    background: #0d9488;
 }
 
 .modal-button-secondary {

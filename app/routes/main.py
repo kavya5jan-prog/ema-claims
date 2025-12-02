@@ -33,11 +33,8 @@ def login_required(f):
 
 @bp.route('/')
 def index():
-    """Root route - redirect based on login status."""
-    if session.get('logged_in'):
-        return redirect(url_for('main.review'))
-    else:
-        return redirect(url_for('main.login'))
+    """Root route - always redirect to login."""
+    return redirect(url_for('main.login'))
 
 
 @bp.route('/login', methods=['GET'])

@@ -31,42 +31,82 @@
 .recommendation-percentages {
     display: flex;
     gap: 30px;
-    padding: 20px;
-    background: #f8f9ff;
-    border-radius: 8px;
+    padding: 25px;
+    background: white;
     border: 2px solid #e0e0e0;
+    border-radius: 8px;
+    transition: all 0.2s ease;
+}
+
+.recommendation-percentages:hover {
+    border-color: #333;
+}
+
+.recommendation-explanation {
+    background: white;
+    border: 2px solid #e0e0e0;
+    border-radius: 8px;
+    padding: 25px;
+    transition: all 0.2s ease;
+}
+
+.recommendation-explanation:hover {
+    border-color: #333;
+}
+
+.recommendation-explanation label {
+    display: block;
+    color: #333;
+    font-size: 1.1em;
+    margin-bottom: 12px;
+    font-weight: 500;
 }
 
 .recommendation-details {
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 30px;
-    padding: 20px;
-    background: #f8f9ff;
+}
+
+.key-factors-section,
+.confidence-section {
+    background: white;
+    border: 2px solid #e0e0e0;
     border-radius: 8px;
+    padding: 25px;
+    transition: all 0.2s ease;
+}
+
+.key-factors-section:hover,
+.confidence-section:hover {
+    border-color: #333;
 }
 
 .key-factors-section h3,
 .confidence-section h3 {
     color: #333;
-    font-size: 1.3em;
+    font-size: 1.5em;
     margin-bottom: 15px;
+    padding-bottom: 10px;
+    border-bottom: 2px solid #f0f0f0;
 }
 
 .key-factors-section ul {
     list-style: none;
     padding: 0;
     margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
 }
 
 .key-factors-section li {
-    padding: 10px 15px;
-    margin-bottom: 8px;
-    background: white;
+    padding: 12px 15px;
+    background: #f8f9ff;
     border-radius: 6px;
     border-left: 3px solid #333;
     color: #333;
-    line-height: 1.5;
+    line-height: 1.6;
 }
 
 .confidence-display {
@@ -87,7 +127,7 @@
     height: 100%;
     background: #333;
     transition: width 0.3s ease;
-    border-radius: 3px;
+    border-radius: 6px;
 }
 
 .confidence-text {
@@ -101,6 +141,7 @@
     justify-content: flex-end;
     padding-top: 20px;
     border-top: 2px solid #e0e0e0;
+    margin-top: 0;
 }
 
 .empty-state-container {

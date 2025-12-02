@@ -90,7 +90,9 @@ def extract_facts():
             return jsonify({'error': error_msg}), 500
         except Exception as e:
             error_msg = str(e)
-            print(f"Fact extraction error: {error_msg}")  # Log for debugging
+            print(f"ERROR: Fact extraction error: {error_msg}")  # Log for debugging
+            import traceback
+            print(f"ERROR: Fact extraction traceback: {traceback.format_exc()}")
             return jsonify({'error': f'Fact extraction failed: {error_msg}'}), 500
     
     except MemoryError as mem_error:
