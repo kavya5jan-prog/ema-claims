@@ -1887,10 +1887,15 @@ function acceptConflictVersion(conflictIndex, variantIndex, acceptedValue) {
     console.log('DEBUG: Storing with key:', key, 'type:', typeof key);
     console.log('DEBUG: Also trying numeric key:', keyNum, 'type:', typeof keyNum);
     
+    // Generate conflict signature for content-based matching
+    const conflictSignature = generateConflictSignature(conflict);
+    console.log('DEBUG: Generated conflict signature:', conflictSignature);
+    
     const acceptedVersionData = {
         value: acceptedValue,
         variantIndex: variantIndex,
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
+        conflictSignature: conflictSignature  // Store signature for content-based matching
     };
     
     currentFactsData.acceptedVersions[key] = acceptedVersionData;
@@ -2826,6 +2831,22 @@ function clearProcessingFromLiabilityColumns() {
     });
 }
 
+// Helper function to generate a unique signature for a conflict based on its content
+function generateConflictSignature(conflict) {
+    if (!conflict) return null;
+    
+    const sources = (conflict.sources || []).slice().sort();
+    const conflictingValues = (conflict.conflicting_values || []).slice().sort();
+    
+    // Create a signature by combining sorted sources and values
+    const signature = JSON.stringify({
+        sources: sources,
+        conflicting_values: conflictingValues
+    });
+    
+    return signature;
+}
+
 function checkIfAllConflictsResolved() {
     const timestamp = new Date().toISOString();
     console.log('LIABILITY_SIGNAL_LOG: [checkIfAllConflictsResolved] ========== CHECKING CONFLICT RESOLUTION ==========');
@@ -2872,16 +2893,31 @@ function checkIfAllConflictsResolved() {
     console.log('DEBUG: acceptedVersions keys types:', Object.keys(currentFactsData.acceptedVersions).map(k => `${k} (${typeof k})`));
     console.log('DEBUG: acceptedVersions entries:', Object.entries(currentFactsData.acceptedVersions));
     
-    // Helper function to match conflict by content (sources and values) as fallback
-    const findAcceptedVersionByContent = (conflict) => {
+    // Helper function to find accepted version by conflict signature (content-based matching)
+    const findAcceptedVersionBySignature = (conflict) => {
         if (!conflict || !currentFactsData.acceptedVersions) return null;
         
+        const conflictSignature = generateConflictSignature(conflict);
+        if (!conflictSignature) return null;
+        
+        console.log(`DEBUG: [Signature Match] Looking for accepted version with signature: ${conflictSignature.substring(0, 100)}...`);
+        
+        // Check all accepted versions to find one that matches this conflict's signature
+        for (const [key, acceptedVersion] of Object.entries(currentFactsData.acceptedVersions)) {
+            if (acceptedVersion && acceptedVersion.conflictSignature) {
+                if (acceptedVersion.conflictSignature === conflictSignature) {
+                    console.log(`DEBUG: [Signature Match] Found accepted version by signature match (key: ${key})`);
+                    return acceptedVersion;
+                }
+            }
+        }
+        
+        // Fallback: if signature doesn't exist (old format), try content matching
         const conflictSources = conflict.sources || [];
         const conflictValues = conflict.conflicting_values || [];
-        const conflictSourcesStr = JSON.stringify(conflictSources.sort());
-        const conflictValuesStr = JSON.stringify(conflictValues.sort());
+        const conflictSourcesStr = JSON.stringify(conflictSources.slice().sort());
+        const conflictValuesStr = JSON.stringify(conflictValues.slice().sort());
         
-        // Check all accepted versions to find one that matches this conflict's content
         for (const [key, acceptedVersion] of Object.entries(currentFactsData.acceptedVersions)) {
             // Try to find the original conflict that this accepted version belongs to
             const originalConflictIndex = parseInt(key);
@@ -2889,12 +2925,12 @@ function checkIfAllConflictsResolved() {
                 const originalConflict = currentFactsData.conflicts[originalConflictIndex];
                 const originalSources = originalConflict.sources || [];
                 const originalValues = originalConflict.conflicting_values || [];
-                const originalSourcesStr = JSON.stringify(originalSources.sort());
-                const originalValuesStr = JSON.stringify(originalValues.sort());
+                const originalSourcesStr = JSON.stringify(originalSources.slice().sort());
+                const originalValuesStr = JSON.stringify(originalValues.slice().sort());
                 
                 // Check if sources and values match
                 if (originalSourcesStr === conflictSourcesStr && originalValuesStr === conflictValuesStr) {
-                    console.log(`DEBUG: [Content Match] Found accepted version for conflict by content matching (key: ${key})`);
+                    console.log(`DEBUG: [Content Match Fallback] Found accepted version for conflict by content matching (key: ${key})`);
                     return acceptedVersion;
                 }
             }
@@ -2903,8 +2939,10 @@ function checkIfAllConflictsResolved() {
     };
     
     // Check if all conflicts have accepted versions
-    // Use String(idx) to ensure consistent key type matching (acceptedVersions keys are stored as strings)
+    // Primary: Match by signature (content-based), Fallback: Match by index
     let resolvedCount = 0;
+    const matchedSignatures = new Set(); // Track which signatures we've matched to avoid duplicates
+    
     const allResolved = currentFactsData.conflicts.every((c, idx) => {
         const key = String(idx);
         const keyNum = idx;
@@ -2912,59 +2950,82 @@ function checkIfAllConflictsResolved() {
         
         console.log(`LIABILITY_SIGNAL_LOG: [checkIfAllConflictsResolved] Checking conflict ${idx}/${conflictsCount - 1}:`);
         console.log(`DEBUG: Checking conflict ${idx}:`);
-        console.log(`  - key (String(idx)): "${key}" (type: ${typeof key})`);
-        console.log(`  - keyNum: ${keyNum} (type: ${typeof keyNum})`);
-        console.log(`  - keyStr: "${keyStr}" (type: ${typeof keyStr})`);
         console.log(`  - conflict object:`, c);
         
-        // Try multiple key formats - check all possible variations
-        let hasAcceptedStr = currentFactsData.acceptedVersions && currentFactsData.acceptedVersions[keyStr];
-        let hasAcceptedNum = currentFactsData.acceptedVersions && currentFactsData.acceptedVersions[keyNum];
+        let matchedAcceptedVersion = null;
+        let matchMethod = null;
         
-        // Also try checking all keys in acceptedVersions for any numeric/string variations
-        if (!hasAcceptedStr && !hasAcceptedNum) {
-            // Check all keys to see if any match this index (handles edge cases)
-            const allKeys = Object.keys(currentFactsData.acceptedVersions);
-            for (const avKey of allKeys) {
-                const avKeyNum = Number(avKey);
-                if (!isNaN(avKeyNum) && avKeyNum === idx) {
-                    hasAcceptedStr = currentFactsData.acceptedVersions[avKey];
-                    console.log(`DEBUG: [Key Match] Found accepted version using alternative key format: "${avKey}"`);
-                    break;
+        // PRIMARY: Try signature-based matching first (most reliable)
+        const conflictSignature = generateConflictSignature(c);
+        if (conflictSignature) {
+            for (const [key, acceptedVersion] of Object.entries(currentFactsData.acceptedVersions)) {
+                if (acceptedVersion && acceptedVersion.conflictSignature === conflictSignature) {
+                    // Check if this signature hasn't been matched to another conflict already
+                    if (!matchedSignatures.has(conflictSignature)) {
+                        matchedAcceptedVersion = acceptedVersion;
+                        matchMethod = `signature (key: ${key})`;
+                        matchedSignatures.add(conflictSignature);
+                        console.log(`DEBUG: [PRIMARY MATCH] Found accepted version by signature for conflict ${idx}`);
+                        break;
+                    }
                 }
             }
         }
         
-        // If still not found, try content-based matching as fallback
-        if (!hasAcceptedStr && !hasAcceptedNum) {
-            const contentMatch = findAcceptedVersionByContent(c);
-            if (contentMatch) {
-                hasAcceptedStr = contentMatch;
-                console.log(`DEBUG: [Content Fallback] Found accepted version for conflict ${idx} using content matching`);
+        // FALLBACK 1: Try index-based matching (for backward compatibility)
+        if (!matchedAcceptedVersion) {
+            let hasAcceptedStr = currentFactsData.acceptedVersions && currentFactsData.acceptedVersions[keyStr];
+            let hasAcceptedNum = currentFactsData.acceptedVersions && currentFactsData.acceptedVersions[keyNum];
+            
+            // Also try checking all keys in acceptedVersions for any numeric/string variations
+            if (!hasAcceptedStr && !hasAcceptedNum) {
+                const allKeys = Object.keys(currentFactsData.acceptedVersions);
+                for (const avKey of allKeys) {
+                    const avKeyNum = Number(avKey);
+                    if (!isNaN(avKeyNum) && avKeyNum === idx) {
+                        hasAcceptedStr = currentFactsData.acceptedVersions[avKey];
+                        matchMethod = `index alternative key format (key: ${avKey})`;
+                        console.log(`DEBUG: [FALLBACK 1] Found accepted version using alternative key format: "${avKey}"`);
+                        break;
+                    }
+                }
+            }
+            
+            if (hasAcceptedStr || hasAcceptedNum) {
+                matchedAcceptedVersion = hasAcceptedStr || hasAcceptedNum;
+                if (!matchMethod) {
+                    matchMethod = `index (key: ${keyStr}/${keyNum})`;
+                }
             }
         }
         
-        const hasAccepted = hasAcceptedStr || hasAcceptedNum;
+        // FALLBACK 2: Try content-based matching (for old format without signatures)
+        if (!matchedAcceptedVersion) {
+            const contentMatch = findAcceptedVersionBySignature(c);
+            if (contentMatch) {
+                matchedAcceptedVersion = contentMatch;
+                matchMethod = 'content fallback';
+                console.log(`DEBUG: [FALLBACK 2] Found accepted version for conflict ${idx} using content matching`);
+            }
+        }
         
-        console.log(`  - acceptedVersions["${keyStr}"]:`, hasAcceptedStr);
-        console.log(`  - acceptedVersions[${keyNum}]:`, hasAcceptedNum);
-        console.log(`  - hasAccepted (combined):`, !!hasAccepted);
+        const hasAccepted = !!matchedAcceptedVersion;
+        
+        console.log(`  - Match method: ${matchMethod || 'NONE'}`);
+        console.log(`  - Has accepted version:`, hasAccepted);
         
         if (!hasAccepted) {
             console.log(`LIABILITY_SIGNAL_LOG: [checkIfAllConflictsResolved] Conflict ${idx} MISSING accepted version`);
             console.log(`DEBUG: Conflict ${idx} missing accepted version.`);
+            console.log(`  - Conflict signature: ${conflictSignature ? conflictSignature.substring(0, 100) + '...' : 'N/A'}`);
             console.log(`  - Available keys:`, Object.keys(currentFactsData.acceptedVersions));
             console.log(`  - Available keys with types:`, Object.keys(currentFactsData.acceptedVersions).map(k => `"${k}" (${typeof k})`));
-            console.log(`  - Checking if key exists with different format...`);
-            console.log(`  - Has key "${keyStr}":`, keyStr in currentFactsData.acceptedVersions);
-            console.log(`  - Has key ${keyNum}:`, keyNum in currentFactsData.acceptedVersions);
-            console.log(`  - All acceptedVersions entries:`, Object.entries(currentFactsData.acceptedVersions));
             console.log(`  - Conflict sources:`, c.sources);
             console.log(`  - Conflict values:`, c.conflicting_values);
         } else {
             resolvedCount++;
-            console.log(`LIABILITY_SIGNAL_LOG: [checkIfAllConflictsResolved] Conflict ${idx} HAS accepted version`);
-            console.log(`  - Accepted version found:`, hasAcceptedStr || hasAcceptedNum);
+            console.log(`LIABILITY_SIGNAL_LOG: [checkIfAllConflictsResolved] Conflict ${idx} HAS accepted version (matched by ${matchMethod})`);
+            console.log(`  - Accepted version found:`, matchedAcceptedVersion);
         }
         
         return hasAccepted;
